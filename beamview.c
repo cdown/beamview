@@ -576,6 +576,11 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    if (prog_state_instance.document) {
+        g_object_unref(prog_state_instance.document);
+        prog_state_instance.document = NULL;
+    }
+
     SDL_Quit();
     return EXIT_SUCCESS;
 }
