@@ -200,51 +200,62 @@ SDL_Surface *create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface,
 }
 
 /**
- * Update texture data in the program state by replacing old textures.
+ * Represents a cached rendered page.
  *
- * @state: Pointer to the program state.
- * @new_left: New left texture.
+ * @page_index: The page index corresponding to this entry.
+ * @left_texture: The SDL texture for the left half of the page.
+ * @right_texture: The SDL texture for the right half of the page.
  * @left_width: Natural width of the left texture.
- * @new_right: New right texture.
  * @right_width: Natural width of the right texture.
- * @texture_height: Natural height for both textures.
+ * @texture_height: Natural height of the combined page.
  */
-void update_textures(struct prog_state *state, SDL_Texture *new_left,
-                     int left_width, SDL_Texture *new_right, int right_width,
-                     int texture_height) {
-    if (state->left.texture)
-        SDL_DestroyTexture(state->left.texture);
-    if (state->right.texture)
-        SDL_DestroyTexture(state->right.texture);
-
-    state->left.texture = new_left;
-    state->left.natural_width = left_width;
-    state->left.natural_height = texture_height;
-
-    state->right.texture = new_right;
-    state->right.natural_width = right_width;
-    state->right.natural_height = texture_height;
-}
+struct render_cache_entry {
+    int page_index;
+    SDL_Texture *left_texture;
+    SDL_Texture *right_texture;
+    int left_width;
+    int right_width;
+    int texture_height;
+};
 
 /**
- * Render a PDF page, split it into left and right halves, convert them to SDL
- * textures, update the program state, and present them on their respective
- * renderers.
+ * Holds cached pages for previous, current, and next slides.
+ *
+ * If a slide does not exist (e.g., at the beginning or end), the pointer is
+ * NULL.
+ *
+ * @prev: Cache entry for the previous page.
+ * @cur: Cache entry for the current page.
+ * @next: Cache entry for the next page.
+ */
+struct render_cache {
+    struct render_cache_entry *prev;
+    struct render_cache_entry *cur;
+    struct render_cache_entry *next;
+};
+
+/**
+ * Render and create a cache entry for a given page index.
+ *
+ * Added debug output to indicate when a page is rendered live.
  *
  * @page_index: The index of the page to render.
  * @state: Pointer to the program state.
  * @renderer_left: The SDL renderer for the left half.
  * @renderer_right: The SDL renderer for the right half.
+ *
+ * @return A new render_cache_entry for the requested page, or NULL on failure.
  */
-int render_pdf_page(int page_index, struct prog_state *state,
-                    SDL_Renderer *renderer_left, SDL_Renderer *renderer_right) {
+struct render_cache_entry *create_cache_entry(int page_index,
+                                              struct prog_state *state,
+                                              SDL_Renderer *renderer_left,
+                                              SDL_Renderer *renderer_right) {
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     if (!page) {
         fprintf(stderr, "Failed to get page %d\n", page_index);
-        return -ENOENT;
+        return NULL;
     }
-
     double page_width, page_height;
     poppler_page_get_size(page, &page_width, &page_height);
 
@@ -262,8 +273,9 @@ int render_pdf_page(int page_index, struct prog_state *state,
         create_sdl_surface_from_cairo(cairo_surface, left_width, right_width,
                                       img_height);
     if (!left_surface || !right_surface) {
-        fprintf(stderr, "Failed to create SDL surfaces\n");
-        return -ENOMEM;
+        fprintf(stderr, "Failed to create SDL surfaces for page %d\n",
+                page_index);
+        return NULL;
     }
 
     SDL_Texture *left_texture =
@@ -271,23 +283,154 @@ int render_pdf_page(int page_index, struct prog_state *state,
     SDL_Texture *right_texture =
         SDL_CreateTextureFromSurface(renderer_right, right_surface);
     if (!left_texture || !right_texture) {
-        fprintf(stderr, "Failed to create SDL textures: %s\n", SDL_GetError());
+        fprintf(stderr, "Failed to create SDL textures for page %d: %s\n",
+                page_index, SDL_GetError());
         if (left_texture)
             SDL_DestroyTexture(left_texture);
         if (right_texture)
             SDL_DestroyTexture(right_texture);
-        return -ENOMEM;
+        return NULL;
     }
 
-    update_textures(state, left_texture, left_width, right_texture, right_width,
-                    img_height);
+    struct render_cache_entry *entry =
+        malloc(sizeof(struct render_cache_entry));
+    if (!entry) {
+        SDL_DestroyTexture(left_texture);
+        SDL_DestroyTexture(right_texture);
+        return NULL;
+    }
+    entry->page_index = page_index;
+    entry->left_texture = left_texture;
+    entry->right_texture = right_texture;
+    entry->left_width = left_width;
+    entry->right_width = right_width;
+    entry->texture_height = img_height;
+    return entry;
+}
 
-    present_texture(renderer_left, state->left.texture,
-                    state->left.natural_width, state->left.natural_height);
-    present_texture(renderer_right, state->right.texture,
-                    state->right.natural_width, state->right.natural_height);
+/**
+ * Free a render cache entry and its associated textures.
+ *
+ * @entry: The render cache entry to free.
+ */
+void free_cache_entry(struct render_cache_entry *entry) {
+    if (!entry)
+        return;
+    if (entry->left_texture)
+        SDL_DestroyTexture(entry->left_texture);
+    if (entry->right_texture)
+        SDL_DestroyTexture(entry->right_texture);
+    free(entry);
+}
 
-    return 0;
+/**
+ * Initialise the cache for the current page.
+ *
+ * This renders the current page synchronously and clears any neighbour entries.
+ *
+ * @cache: The render cache to initialise.
+ * @current_page: The current page index.
+ * @state: Pointer to the program state.
+ * @renderer_left: The SDL renderer for the left half.
+ * @renderer_right: The SDL renderer for the right half.
+ */
+void init_cache_for_page(struct render_cache *cache, int current_page,
+                         struct prog_state *state, SDL_Renderer *renderer_left,
+                         SDL_Renderer *renderer_right) {
+    if (cache->prev) {
+        free_cache_entry(cache->prev);
+        cache->prev = NULL;
+    }
+    if (cache->cur) {
+        free_cache_entry(cache->cur);
+        cache->cur = NULL;
+    }
+    if (cache->next) {
+        free_cache_entry(cache->next);
+        cache->next = NULL;
+    }
+    cache->cur =
+        create_cache_entry(current_page, state, renderer_left, renderer_right);
+}
+
+/**
+ * When idle (i.e., no events for 50ms), update the cache by creating neighbour
+ * entries if needed.
+ *
+ * @cache: The render cache structure.
+ * @current_page: The current page index.
+ * @state: Pointer to the program state.
+ * @renderer_left: The SDL renderer for the left half.
+ * @renderer_right: The SDL renderer for the right half.
+ * @num_pages: The total number of pages in the document.
+ */
+void update_cache(struct render_cache *cache, int current_page,
+                  struct prog_state *state, SDL_Renderer *renderer_left,
+                  SDL_Renderer *renderer_right, int num_pages) {
+    if (cache->cur == NULL)
+        return;
+    if (current_page > 0 && cache->prev == NULL) {
+        cache->prev = create_cache_entry(current_page - 1, state, renderer_left,
+                                         renderer_right);
+    }
+    if (current_page < num_pages - 1 && cache->next == NULL) {
+        cache->next = create_cache_entry(current_page + 1, state, renderer_left,
+                                         renderer_right);
+    }
+}
+
+/**
+ * Update the cache when a page change occurs.
+ *
+ * If the new page is already cached (in prev or next), shift the cache window.
+ * Otherwise, reinitialise the cache for the new page, rendering only the
+ * current page. Note: neighbour pages are not pre-rendered during keypress;
+ * update_cache will handle that during idle.
+ */
+void update_cache_on_page_change(struct render_cache *cache, int new_page,
+                                 struct prog_state *state,
+                                 SDL_Renderer *renderer_left,
+                                 SDL_Renderer *renderer_right) {
+    if (cache->cur && cache->cur->page_index == new_page) {
+        // Cache is already current?
+        return;
+    }
+    if (cache->next && cache->next->page_index == new_page) {
+        if (cache->prev) {
+            free_cache_entry(cache->prev);
+        }
+        cache->prev = cache->cur;
+        cache->cur = cache->next;
+        cache->next = NULL;
+        return;
+    }
+    if (cache->prev && cache->prev->page_index == new_page) {
+        if (cache->next) {
+            free_cache_entry(cache->next);
+        }
+        cache->next = cache->cur;
+        cache->cur = cache->prev;
+        cache->prev = NULL;
+        return;
+    }
+    fprintf(stderr, "Cache not ready for page %d\n", new_page);
+    init_cache_for_page(cache, new_page, state, renderer_left, renderer_right);
+}
+
+/**
+ * Apply the textures from the current cache entry to the program state.
+ *
+ * @state: Pointer to the program state.
+ * @entry: The current cache entry.
+ */
+void apply_cache_entry_to_state(struct prog_state *state,
+                                struct render_cache_entry *entry) {
+    state->left.texture = entry->left_texture;
+    state->left.natural_width = entry->left_width;
+    state->left.natural_height = entry->texture_height;
+    state->right.texture = entry->right_texture;
+    state->right.natural_width = entry->right_width;
+    state->right.natural_height = entry->texture_height;
 }
 
 /**
@@ -433,6 +576,18 @@ int handle_sdl_events(struct prog_state *state, int num_pages,
     int current_page = 0;
     Uint32 window_left_id = SDL_GetWindowID(window_left);
     Uint32 window_right_id = SDL_GetWindowID(window_right);
+    Uint32 last_activity = SDL_GetTicks();
+
+    struct render_cache cache = {0};
+    init_cache_for_page(&cache, 0, state, renderer_left, renderer_right);
+    if (cache.cur) {
+        apply_cache_entry_to_state(state, cache.cur);
+        present_texture(renderer_left, state->left.texture,
+                        state->left.natural_width, state->left.natural_height);
+        present_texture(renderer_right, state->right.texture,
+                        state->right.natural_width,
+                        state->right.natural_height);
+    }
 
     while (running) {
         SDL_Event event;
@@ -449,29 +604,40 @@ int handle_sdl_events(struct prog_state *state, int num_pages,
                             pending_quit = 1;
                     } else {
                         pending_quit = 0;
-                        int page_changed = 0;
+                        int new_page = current_page;
                         if (event.key.keysym.sym == SDLK_LEFT ||
                             event.key.keysym.sym == SDLK_UP ||
                             event.key.keysym.sym == SDLK_PAGEUP) {
-                            if (current_page > 0) {
-                                current_page--;
-                                page_changed = 1;
-                            }
+                            if (current_page > 0)
+                                new_page = current_page - 1;
                         } else if (event.key.keysym.sym == SDLK_RIGHT ||
                                    event.key.keysym.sym == SDLK_DOWN ||
                                    event.key.keysym.sym == SDLK_PAGEDOWN) {
-                            if (current_page < num_pages - 1) {
-                                current_page++;
-                                page_changed = 1;
-                            }
+                            if (current_page < num_pages - 1)
+                                new_page = current_page + 1;
                         }
-                        if (page_changed) {
-                            int ret =
-                                render_pdf_page(current_page, state,
-                                                renderer_left, renderer_right);
-                            if (ret < 0)
-                                fprintf(stderr, "Error rendering page %d: %d\n",
-                                        current_page, ret);
+                        if (new_page != current_page) {
+                            current_page = new_page;
+                            last_activity = SDL_GetTicks();
+                            // Update only the current page; neighbour updates
+                            // are deferred until idle
+                            update_cache_on_page_change(&cache, current_page,
+                                                        state, renderer_left,
+                                                        renderer_right);
+                            if (cache.cur) {
+                                apply_cache_entry_to_state(state, cache.cur);
+                                present_texture(renderer_left,
+                                                state->left.texture,
+                                                state->left.natural_width,
+                                                state->left.natural_height);
+                                present_texture(renderer_right,
+                                                state->right.texture,
+                                                state->right.natural_width,
+                                                state->right.natural_height);
+                            } else {
+                                fprintf(stderr, "Error rendering page %d\n",
+                                        current_page);
+                            }
                         }
                     }
                     break;
@@ -482,12 +648,21 @@ int handle_sdl_events(struct prog_state *state, int num_pages,
                                           state->pdf_width, state->pdf_height);
                         if (fabs(new_scale - state->current_scale) > 0.01) {
                             state->current_scale = new_scale;
-                            int ret =
-                                render_pdf_page(current_page, state,
+                            fprintf(stderr, "Window resized, new scale: %.2f\n",
+                                    new_scale);
+                            init_cache_for_page(&cache, current_page, state,
                                                 renderer_left, renderer_right);
-                            if (ret < 0)
-                                fprintf(stderr, "Error rendering page %d: %d\n",
-                                        current_page, ret);
+                            if (cache.cur) {
+                                apply_cache_entry_to_state(state, cache.cur);
+                                present_texture(renderer_left,
+                                                state->left.texture,
+                                                state->left.natural_width,
+                                                state->left.natural_height);
+                                present_texture(renderer_right,
+                                                state->right.texture,
+                                                state->right.natural_width,
+                                                state->right.natural_height);
+                            }
                         }
                     } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED ||
                                event.window.event == SDL_WINDOWEVENT_SHOWN ||
@@ -507,8 +682,21 @@ int handle_sdl_events(struct prog_state *state, int num_pages,
                     break;
             }
         }
+
+        if (SDL_GetTicks() - last_activity > 50) {
+            update_cache(&cache, current_page, state, renderer_left,
+                         renderer_right, num_pages);
+        }
+
         SDL_Delay(10);
     }
+
+    if (cache.prev)
+        free_cache_entry(cache.prev);
+    if (cache.cur)
+        free_cache_entry(cache.cur);
+    if (cache.next)
+        free_cache_entry(cache.next);
 
     return 0;
 }
@@ -557,12 +745,6 @@ int main(int argc, char *argv[]) {
     prog_state_instance.current_scale =
         compute_scale(window_left, window_right, prog_state_instance.pdf_width,
                       prog_state_instance.pdf_height);
-    ret =
-        render_pdf_page(0, &prog_state_instance, renderer_left, renderer_right);
-    if (ret < 0) {
-        SDL_Quit();
-        return EXIT_FAILURE;
-    }
 
     int num_pages = poppler_document_get_n_pages(prog_state_instance.document);
     ret = handle_sdl_events(&prog_state_instance, num_pages, window_left,
