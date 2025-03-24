@@ -175,6 +175,16 @@ cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page, double scale,
 SDL_Surface *create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface,
                                            int x_offset, int region_width,
                                            int img_height) {
+    int cairo_width = cairo_image_surface_get_width(cairo_surface);
+    if (x_offset < 0 || region_width <= 0 ||
+        x_offset + region_width > cairo_width) {
+        fprintf(
+            stderr,
+            "Requested region exceeds cairo surface bounds: x_offset %d, region_width %d, cairo_width %d\n",
+            x_offset, region_width, cairo_width);
+        return NULL;
+    }
+
     SDL_Surface *sdl_surface =
         SDL_CreateRGBSurface(0, region_width, img_height, 32, 0x00FF0000,
                              0x0000FF00, 0x000000FF, 0xFF000000);
