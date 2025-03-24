@@ -718,8 +718,8 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    struct prog_state prog_state_instance;
-    ret = init_prog_state(&prog_state_instance, argv[1]);
+    struct prog_state ps;
+    ret = init_prog_state(&ps, argv[1]);
     if (ret < 0) {
         SDL_Quit();
         return EXIT_FAILURE;
@@ -727,9 +727,8 @@ int main(int argc, char *argv[]) {
 
     _drop_(SDL_DestroyWindow) SDL_Window *window_left = NULL;
     _drop_(SDL_DestroyWindow) SDL_Window *window_right = NULL;
-    ret = create_windows(&window_left, &window_right,
-                         prog_state_instance.pdf_width,
-                         prog_state_instance.pdf_height);
+    ret = create_windows(&window_left, &window_right, ps.pdf_width,
+                         ps.pdf_height);
     if (ret < 0) {
         SDL_Quit();
         return EXIT_FAILURE;
@@ -744,21 +743,20 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    prog_state_instance.current_scale =
-        compute_scale(window_left, window_right, prog_state_instance.pdf_width,
-                      prog_state_instance.pdf_height);
+    ps.current_scale =
+        compute_scale(window_left, window_right, ps.pdf_width, ps.pdf_height);
 
-    int num_pages = poppler_document_get_n_pages(prog_state_instance.document);
-    ret = handle_sdl_events(&prog_state_instance, num_pages, window_left,
-                            window_right, renderer_left, renderer_right);
+    int num_pages = poppler_document_get_n_pages(ps.document);
+    ret = handle_sdl_events(&ps, num_pages, window_left, window_right,
+                            renderer_left, renderer_right);
     if (ret < 0) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
 
-    if (prog_state_instance.document) {
-        g_object_unref(prog_state_instance.document);
-        prog_state_instance.document = NULL;
+    if (ps.document) {
+        g_object_unref(ps.document);
+        ps.document = NULL;
     }
 
     SDL_Quit();
