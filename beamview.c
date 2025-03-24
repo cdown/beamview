@@ -120,6 +120,11 @@ void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
  */
 double compute_scale(SDL_Window *window_left, SDL_Window *window_right,
                      double pdf_width, double pdf_height) {
+    if (pdf_width <= 0 || pdf_height <= 0) {
+        fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
+                pdf_width, pdf_height);
+        return 1.0;
+    }
     int lw, lh, rw, rh;
     SDL_GetWindowSize(window_left, &lw, &lh);
     SDL_GetWindowSize(window_right, &rw, &rh);
