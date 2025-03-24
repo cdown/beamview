@@ -83,8 +83,8 @@ struct prog_state {
  * @natural_width: The original width of the texture.
  * @natural_height: The original height of the texture.
  */
-void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
-                     int natural_width, int natural_height) {
+static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
+                            int natural_width, int natural_height) {
     if (!texture)
         return;
 
@@ -114,8 +114,8 @@ void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
  * @pdf_width: The intrinsic PDF width.
  * @pdf_height: The intrinsic PDF height.
  */
-double compute_scale(SDL_Window *window_left, SDL_Window *window_right,
-                     double pdf_width, double pdf_height) {
+static double compute_scale(SDL_Window *window_left, SDL_Window *window_right,
+                            double pdf_width, double pdf_height) {
     if (pdf_width <= 0 || pdf_height <= 0) {
         fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
                 pdf_width, pdf_height);
@@ -141,8 +141,10 @@ double compute_scale(SDL_Window *window_left, SDL_Window *window_right,
  * @img_width: Output pointer for the resulting image width.
  * @img_height: Output pointer for the resulting image height.
  */
-cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page, double scale,
-                                              int *img_width, int *img_height) {
+static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
+                                                     double scale,
+                                                     int *img_width,
+                                                     int *img_height) {
     double page_width, page_height;
     poppler_page_get_size(page, &page_width, &page_height);
     *img_width = (int)(page_width * scale);
@@ -168,9 +170,9 @@ cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page, double scale,
  * @region_width: The width of the region to extract.
  * @img_height: The height of the image.
  */
-SDL_Surface *create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface,
-                                           int x_offset, int region_width,
-                                           int img_height) {
+static SDL_Surface *
+create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
+                              int region_width, int img_height) {
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
     if (x_offset < 0 || region_width <= 0 ||
         x_offset + region_width > cairo_width) {
@@ -246,10 +248,9 @@ struct render_cache {
  *
  * @return A new render_cache_entry for the requested page, or NULL on failure.
  */
-struct render_cache_entry *create_cache_entry(int page_index,
-                                              struct prog_state *state,
-                                              SDL_Renderer *renderer_left,
-                                              SDL_Renderer *renderer_right) {
+static struct render_cache_entry *
+create_cache_entry(int page_index, struct prog_state *state,
+                   SDL_Renderer *renderer_left, SDL_Renderer *renderer_right) {
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     if (!page) {
@@ -313,7 +314,7 @@ struct render_cache_entry *create_cache_entry(int page_index,
  *
  * @entry: The render cache entry to free.
  */
-void free_cache_entry(struct render_cache_entry *entry) {
+static void free_cache_entry(struct render_cache_entry *entry) {
     if (!entry)
         return;
     if (entry->left_texture)
@@ -334,9 +335,10 @@ void free_cache_entry(struct render_cache_entry *entry) {
  * @renderer_left: The SDL renderer for the left half.
  * @renderer_right: The SDL renderer for the right half.
  */
-void init_cache_for_page(struct render_cache *cache, int current_page,
-                         struct prog_state *state, SDL_Renderer *renderer_left,
-                         SDL_Renderer *renderer_right) {
+static void init_cache_for_page(struct render_cache *cache, int current_page,
+                                struct prog_state *state,
+                                SDL_Renderer *renderer_left,
+                                SDL_Renderer *renderer_right) {
     if (cache->prev) {
         free_cache_entry(cache->prev);
         cache->prev = NULL;
@@ -364,9 +366,9 @@ void init_cache_for_page(struct render_cache *cache, int current_page,
  * @renderer_right: The SDL renderer for the right half.
  * @num_pages: The total number of pages in the document.
  */
-void update_cache(struct render_cache *cache, int current_page,
-                  struct prog_state *state, SDL_Renderer *renderer_left,
-                  SDL_Renderer *renderer_right, int num_pages) {
+static void update_cache(struct render_cache *cache, int current_page,
+                         struct prog_state *state, SDL_Renderer *renderer_left,
+                         SDL_Renderer *renderer_right, int num_pages) {
     if (cache->cur == NULL)
         return;
     if (current_page > 0 && cache->prev == NULL) {
@@ -387,10 +389,10 @@ void update_cache(struct render_cache *cache, int current_page,
  * current page. Note: neighbour pages are not pre-rendered during keypress;
  * update_cache will handle that during idle.
  */
-void update_cache_on_page_change(struct render_cache *cache, int new_page,
-                                 struct prog_state *state,
-                                 SDL_Renderer *renderer_left,
-                                 SDL_Renderer *renderer_right) {
+static void update_cache_on_page_change(struct render_cache *cache,
+                                        int new_page, struct prog_state *state,
+                                        SDL_Renderer *renderer_left,
+                                        SDL_Renderer *renderer_right) {
     if (cache->cur && cache->cur->page_index == new_page) {
         // Cache is already current?
         return;
@@ -423,8 +425,8 @@ void update_cache_on_page_change(struct render_cache *cache, int new_page,
  * @state: Pointer to the program state.
  * @entry: The current cache entry.
  */
-void apply_cache_entry_to_state(struct prog_state *state,
-                                struct render_cache_entry *entry) {
+static void apply_cache_entry_to_state(struct prog_state *state,
+                                       struct render_cache_entry *entry) {
     state->left.texture = entry->left_texture;
     state->left.natural_width = entry->left_width;
     state->left.natural_height = entry->texture_height;
@@ -440,7 +442,7 @@ void apply_cache_entry_to_state(struct prog_state *state,
  * @state: Pointer to the program state.
  * @pdf_file: Path to the PDF file.
  */
-int init_prog_state(struct prog_state *state, const char *pdf_file) {
+static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     memset(state, 0, sizeof(*state));
 
     char resolved_path[PATH_MAX];
@@ -490,7 +492,7 @@ int init_prog_state(struct prog_state *state, const char *pdf_file) {
  * @width: The window width.
  * @height: The window height.
  */
-SDL_Window *create_window(const char *title, int width, int height) {
+static SDL_Window *create_window(const char *title, int width, int height) {
     return SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED,
                             SDL_WINDOWPOS_CENTERED, width, height,
                             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
@@ -505,8 +507,8 @@ SDL_Window *create_window(const char *title, int width, int height) {
  * @pdf_width: The intrinsic PDF width.
  * @pdf_height: The intrinsic PDF height.
  */
-int create_windows(SDL_Window **window_left, SDL_Window **window_right,
-                   double pdf_width, double pdf_height) {
+static int create_windows(SDL_Window **window_left, SDL_Window **window_right,
+                          double pdf_width, double pdf_height) {
     int init_scale = 1;
     int init_img_width = (int)(pdf_width * init_scale);
     int init_img_height = (int)(pdf_height * init_scale);
@@ -537,9 +539,9 @@ int create_windows(SDL_Window **window_left, SDL_Window **window_right,
  * @window_left: The left SDL window.
  * @window_right: The right SDL window.
  */
-int create_renderers(SDL_Renderer **renderer_left,
-                     SDL_Renderer **renderer_right, SDL_Window *window_left,
-                     SDL_Window *window_right) {
+static int create_renderers(SDL_Renderer **renderer_left,
+                            SDL_Renderer **renderer_right,
+                            SDL_Window *window_left, SDL_Window *window_right) {
     *renderer_left = SDL_CreateRenderer(
         window_left, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     *renderer_right = SDL_CreateRenderer(
@@ -567,10 +569,10 @@ int create_renderers(SDL_Renderer **renderer_left,
  * @renderer_left: The left SDL renderer.
  * @renderer_right: The right SDL renderer.
  */
-int handle_sdl_events(struct prog_state *state, int num_pages,
-                      SDL_Window *window_left, SDL_Window *window_right,
-                      SDL_Renderer *renderer_left,
-                      SDL_Renderer *renderer_right) {
+static int handle_sdl_events(struct prog_state *state, int num_pages,
+                             SDL_Window *window_left, SDL_Window *window_right,
+                             SDL_Renderer *renderer_left,
+                             SDL_Renderer *renderer_right) {
     int running = 1;
     int pending_quit = 0;
     int current_page = 0;
