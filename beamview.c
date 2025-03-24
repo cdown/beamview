@@ -9,10 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// TODO: Look at how Chrome does this. This as it is can produce some weird
-// unsharp mask effects
-#define OVERSAMPLE_FACTOR 1.2
-
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
 #define DEFINE_DROP_FUNC_PTR(type, func)                                       \
@@ -134,7 +130,7 @@ double compute_scale(SDL_Window *window_left, SDL_Window *window_right,
     double scale_right =
         fmax((double)rw / (pdf_width / 2.0), (double)rh / pdf_height);
 
-    return fmax(scale_left, scale_right) * OVERSAMPLE_FACTOR;
+    return fmax(scale_left, scale_right);
 }
 
 /**
