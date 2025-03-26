@@ -252,8 +252,6 @@ create_cache_entry(int page_index, struct prog_state *state,
         fprintf(stderr, "Failed to get page %d\n", page_index);
         return NULL;
     }
-    double page_width, page_height;
-    poppler_page_get_size(page, &page_width, &page_height);
 
     int img_width, img_height;
     _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
