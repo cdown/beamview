@@ -502,9 +502,8 @@ static SDL_Window *create_window(const char *title, int width, int height) {
  */
 static int create_windows(SDL_Window **window_left, SDL_Window **window_right,
                           double pdf_width, double pdf_height) {
-    int init_scale = 1;
-    int init_img_width = (int)(pdf_width * init_scale);
-    int init_img_height = (int)(pdf_height * init_scale);
+    int init_img_width = (int)pdf_width;
+    int init_img_height = (int)pdf_height;
     int init_left_width = init_img_width / 2;
     int init_right_width = init_img_width - init_left_width;
 
