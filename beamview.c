@@ -64,6 +64,7 @@ struct sdl_ctx {
  * @pdf_height: The intrinsic PDF height.
  * @current_scale: The scale factor applied for rendering.
  * @document: The PopplerDocument representing the PDF.
+ * @cache_complete: Flag to bypass recaching if all slides are cached.
  */
 struct prog_state {
     struct sdl_ctx *ctx;
@@ -72,6 +73,7 @@ struct prog_state {
     double pdf_height;
     double current_scale;
     PopplerDocument *document;
+    int cache_complete;
 };
 
 /**
@@ -330,20 +332,29 @@ static void free_all_cache_entries(struct render_cache_entry **cache_entries,
  *
  * Renders one missing page per idle cycle.
  *
+ * Added fast exit mode if all slides are already cached.
+ *
  * @cache_entries: Array of cache entries.
  * @num_pages: The total number of pages in the document.
  * @state: Pointer to the program state.
  */
 static void cache_one_slide(struct render_cache_entry **cache_entries,
                             int num_pages, struct prog_state *state) {
+    if (state->cache_complete)
+        return;
+
+    int complete = 1;
     for (int i = 0; i < num_pages; i++) {
         if (cache_entries[i] == NULL) {
             cache_entries[i] =
                 create_cache_entry(i, state, state->ctx, state->num_ctx);
+            complete = 0;
             // Render one missing slide per idle cycle.
             break;
         }
     }
+
+    state->cache_complete = complete;
 }
 
 /**
@@ -390,6 +401,7 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
 
     state->current_scale = 1.0;
+    state->cache_complete = 0;
 
     return 0;
 }
@@ -576,6 +588,7 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
                             fprintf(stderr, "Window resized, new scale: %.2f\n",
                                     new_scale);
                             free_all_cache_entries(cache_entries, num_pages);
+                            state->cache_complete = 0;
                             cache_entries[current_page] =
                                 create_cache_entry(current_page, state,
                                                    state->ctx, state->num_ctx);
