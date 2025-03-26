@@ -1,4 +1,5 @@
-#include <SDL2/SDL.h>
+#include <GL/gl.h>
+#include <GLFW/glfw3.h>
 #include <cairo.h>
 #include <errno.h>
 #include <glib.h>
@@ -25,97 +26,146 @@
         }                                                                      \
     }
 
-DEFINE_DROP_FUNC(SDL_Surface *, SDL_FreeSurface)
+#define DEFINE_DROP_FUNC_VOID(func)                                            \
+    static inline void drop_##func(void *p) {                                  \
+        void **pp = p;                                                         \
+        if (*pp)                                                               \
+            func(*pp);                                                         \
+    }
+
+DEFINE_DROP_FUNC_VOID(free)
 DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
 DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
-DEFINE_DROP_FUNC(SDL_Texture *, SDL_DestroyTexture)
-DEFINE_DROP_FUNC(SDL_Renderer *, SDL_DestroyRenderer)
-DEFINE_DROP_FUNC(SDL_Window *, SDL_DestroyWindow)
 
 #define NUM_CONTEXTS 2
 
 /**
- * Holds SDL texture information and its natural dimensions.
+ * Holds texture information and its natural dimensions.
  *
- * @texture: The SDL texture.
+ * @texture: The OpenGL texture.
  * @natural_width: The original width of the texture.
  * @natural_height: The original height of the texture.
  */
 struct texture_data {
-    SDL_Texture *texture;
+    GLuint texture;
     int natural_width;
     int natural_height;
 };
 
-/* Represents an SDL context, including window, renderer, and texture data. */
-struct sdl_ctx {
-    SDL_Window *window;
-    SDL_Renderer *renderer;
+/* Represents a context, including a GLFW window and texture data. */
+struct gl_ctx {
+    GLFWwindow *window;
     struct texture_data texture;
+};
+
+/**
+ * Represents a cached rendered page.
+ *
+ * @page_index: The page index corresponding to this entry.
+ * @textures: Array of textures for each context.
+ * @widths: Array of natural widths for each texture.
+ * @texture_height: Natural height of the combined page.
+ */
+struct render_cache_entry {
+    int page_index;
+    GLuint textures[NUM_CONTEXTS];
+    int widths[NUM_CONTEXTS];
+    int texture_height;
 };
 
 /**
  * Holds the program state including contexts, PDF dimensions, scale, and
  * document.
  *
- * @ctx: Array of SDL contexts.
- * @num_ctx: Number of SDL contexts.
+ * @ctx: Array of contexts.
+ * @num_ctx: Number of contexts.
  * @pdf_width: The intrinsic PDF width.
  * @pdf_height: The intrinsic PDF height.
  * @current_scale: The scale factor applied for rendering.
  * @document: The PopplerDocument representing the PDF.
  * @cache_complete: Flag to bypass recaching if all slides are cached.
+ * @current_page: The currently displayed page.
+ * @pending_quit: Flag to allow fast exit on repeated Q key presses.
+ * @num_pages: Total number of pages in the document.
+ * @cache_entries: Array of cached rendered pages.
  */
 struct prog_state {
-    struct sdl_ctx *ctx;
+    struct gl_ctx *ctx;
     int num_ctx;
     double pdf_width;
     double pdf_height;
     double current_scale;
     PopplerDocument *document;
     int cache_complete;
+    int current_page;
+    int pending_quit;
+    int num_pages;
+    struct render_cache_entry **cache_entries;
 };
 
 /**
- * Present a texture on a renderer while maintaining its aspect ratio.
+ * Present a texture on a window while maintaining its aspect ratio.
  *
- * @renderer: The SDL renderer.
- * @texture: The SDL texture to present.
+ * @window: The GLFW window with an OpenGL context.
+ * @texture: The OpenGL texture to present.
  * @natural_width: The original width of the texture.
  * @natural_height: The original height of the texture.
  */
-static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
+static void present_texture(GLFWwindow *window, GLuint texture,
                             int natural_width, int natural_height) {
     if (!texture)
         return;
 
     int win_width, win_height;
-    SDL_GetRendererOutputSize(renderer, &win_width, &win_height);
+    glfwGetFramebufferSize(window, &win_width, &win_height);
 
     float scale = fmin((float)win_width / natural_width,
                        (float)win_height / natural_height);
     int new_width = (int)(natural_width * scale);
     int new_height = (int)(natural_height * scale);
 
-    SDL_Rect dst = {(win_width - new_width) / 2, (win_height - new_height) / 2,
-                    new_width, new_height};
+    int dst_x = (win_width - new_width) / 2;
+    int dst_y = (win_height - new_height) / 2;
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
-    SDL_RenderCopy(renderer, texture, NULL, &dst);
-    SDL_RenderPresent(renderer);
+    glfwMakeContextCurrent(window);
+    glViewport(0, 0, win_width, win_height);
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, win_width, win_height, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f);
+    glVertex2i(dst_x, dst_y);
+    glTexCoord2f(1.0f, 0.0f);
+    glVertex2i(dst_x + new_width, dst_y);
+    glTexCoord2f(1.0f, 1.0f);
+    glVertex2i(dst_x + new_width, dst_y + new_height);
+    glTexCoord2f(0.0f, 1.0f);
+    glVertex2i(dst_x, dst_y + new_height);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+    glfwSwapBuffers(window);
 }
 
 /**
  * Compute the required scale factor based on the intrinsic PDF dimensions and
- * the sizes of SDL windows in multiple contexts.
+ * the sizes of windows in multiple contexts.
  *
- * @ctx: Array of SDL contexts.
+ * @ctx: Array of contexts.
  * @num_ctx: Number of contexts.
  * @pdf_width: The intrinsic PDF width.
  * @pdf_height: The intrinsic PDF height.
  */
-static double compute_scale(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
+static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
     if (pdf_width <= 0 || pdf_height <= 0) {
         fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
@@ -125,7 +175,7 @@ static double compute_scale(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
-        SDL_GetWindowSize(ctx[i].window, &win_width, &win_height);
+        glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
         double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
                               (double)win_height / pdf_height);
         if (scale_i > scale)
@@ -169,16 +219,16 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
 }
 
 /**
- * Create an SDL surface from a region of a Cairo image surface.
+ * Create an OpenGL texture from a region of a Cairo image surface.
  *
  * @cairo_surface: The source Cairo surface.
  * @x_offset: The starting x offset in pixels.
  * @region_width: The width of the region to extract.
  * @img_height: The height of the image.
  */
-static SDL_Surface *
-create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
-                              int region_width, int img_height) {
+static GLuint create_gl_texture_from_cairo(cairo_surface_t *cairo_surface,
+                                           int x_offset, int region_width,
+                                           int img_height) {
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
     if (x_offset < 0 || region_width <= 0 ||
         x_offset + region_width > cairo_width) {
@@ -186,41 +236,31 @@ create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
             stderr,
             "Requested region exceeds cairo surface bounds: x_offset %d, region_width %d, cairo_width %d\n",
             x_offset, region_width, cairo_width);
-        return NULL;
+        return 0;
     }
-
-    SDL_Surface *sdl_surface =
-        SDL_CreateRGBSurface(0, region_width, img_height, 32, 0x00FF0000,
-                             0x0000FF00, 0x000000FF, 0xFF000000);
-    if (!sdl_surface)
-        return NULL;
 
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
 
+    _drop_(free) unsigned char *buffer = malloc(region_width * img_height * 4);
+    if (!buffer) {
+        fprintf(stderr, "Failed to allocate buffer for texture\n");
+        return 0;
+    }
     for (int y = 0; y < img_height; y++) {
         unsigned char *src_row = cairo_data + y * cairo_stride + x_offset * 4;
-        memcpy((unsigned char *)sdl_surface->pixels + y * sdl_surface->pitch,
-               src_row, region_width * 4);
+        memcpy(buffer + y * region_width * 4, src_row, region_width * 4);
     }
 
-    return sdl_surface;
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_width, img_height, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, buffer);
+    return texture;
 }
-
-/**
- * Represents a cached rendered page.
- *
- * @page_index: The page index corresponding to this entry.
- * @textures: Array of SDL textures for each context.
- * @widths: Array of natural widths for each texture.
- * @texture_height: Natural height of the combined page.
- */
-struct render_cache_entry {
-    int page_index;
-    SDL_Texture *textures[NUM_CONTEXTS];
-    int widths[NUM_CONTEXTS];
-    int texture_height;
-};
 
 /**
  * Free a render cache entry and its associated textures.
@@ -232,7 +272,7 @@ static void free_cache_entry(struct render_cache_entry *entry) {
         return;
     for (int i = 0; i < NUM_CONTEXTS; i++) {
         if (entry->textures[i])
-            SDL_DestroyTexture(entry->textures[i]);
+            glDeleteTextures(1, &entry->textures[i]);
     }
     free(entry);
 }
@@ -244,14 +284,11 @@ static void free_cache_entry(struct render_cache_entry *entry) {
  *
  * @page_index: The index of the page to render.
  * @state: Pointer to the program state.
- * @ctx: Array of SDL contexts.
  *
  * @return A new render_cache_entry for the requested page, or NULL on failure.
  */
 static struct render_cache_entry *create_cache_entry(int page_index,
-                                                     struct prog_state *state,
-                                                     struct sdl_ctx ctx[],
-                                                     int num_ctx) {
+                                                     struct prog_state *state) {
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     if (!page) {
@@ -271,42 +308,28 @@ static struct render_cache_entry *create_cache_entry(int page_index,
     }
     entry->page_index = page_index;
     entry->texture_height = img_height;
-    int base_width = img_width / num_ctx;
-    for (int i = 0; i < num_ctx; i++) {
+    int base_width = img_width / state->num_ctx;
+    for (int i = 0; i < state->num_ctx; i++) {
         int x_offset = i * base_width;
-        int region_width =
-            (i == num_ctx - 1) ? (img_width - base_width * i) : base_width;
-        SDL_Surface *surface = create_sdl_surface_from_cairo(
+        int region_width = (i == state->num_ctx - 1)
+                               ? (img_width - base_width * i)
+                               : base_width;
+        entry->widths[i] = region_width;
+        entry->textures[i] = create_gl_texture_from_cairo(
             cairo_surface, x_offset, region_width, img_height);
-        if (!surface) {
+        if (!entry->textures[i]) {
             fprintf(stderr,
-                    "Failed to create SDL surface for page %d, context %d\n",
+                    "Failed to create OpenGL texture for page %d, context %d\n",
                     page_index, i);
             for (int j = 0; j < i; j++) {
                 if (entry->textures[j])
-                    SDL_DestroyTexture(entry->textures[j]);
+                    glDeleteTextures(1, &entry->textures[j]);
             }
             free(entry);
             return NULL;
         }
-        entry->widths[i] = region_width;
-        entry->textures[i] =
-            SDL_CreateTextureFromSurface(ctx[i].renderer, surface);
-        if (!entry->textures[i]) {
-            fprintf(
-                stderr,
-                "Failed to create SDL texture for page %d, context %d: %s\n",
-                page_index, i, SDL_GetError());
-            SDL_FreeSurface(surface);
-            for (int j = 0; j < i; j++) {
-                if (entry->textures[j])
-                    SDL_DestroyTexture(entry->textures[j]);
-            }
-            free(entry);
-            return NULL;
-        }
-        SDL_FreeSurface(surface);
     }
+    fprintf(stderr, "Cache page %d created.\n", page_index);
     return entry;
 }
 
@@ -345,15 +368,16 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
 
     int complete = 1;
     for (int i = 0; i < num_pages; i++) {
-        if (cache_entries[i] == NULL) {
-            cache_entries[i] =
-                create_cache_entry(i, state, state->ctx, state->num_ctx);
+        if (!cache_entries[i]) {
+            cache_entries[i] = create_cache_entry(i, state);
             complete = 0;
             // Render one missing slide per idle cycle.
             break;
         }
     }
-
+    if (complete == 1) {
+        fprintf(stderr, "Caching complete.\n");
+    }
     state->cache_complete = complete;
 }
 
@@ -407,27 +431,27 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
 }
 
 /**
- * Create an SDL window with the given title and dimensions.
+ * Create a window with the given title and dimensions.
  *
  * @title: The window title.
  * @width: The window width.
  * @height: The window height.
+ * @share: An existing window to share the OpenGL context with (can be NULL).
  */
-static SDL_Window *create_window(const char *title, int width, int height) {
-    return SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED,
-                            SDL_WINDOWPOS_CENTERED, width, height,
-                            SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+static GLFWwindow *create_window(const char *title, int width, int height,
+                                 GLFWwindow *share) {
+    return glfwCreateWindow(width, height, title, NULL, share);
 }
 
 /**
- * Create SDL contexts (windows) based on the intrinsic PDF dimensions.
+ * Create contexts (windows) based on the intrinsic PDF dimensions.
  *
- * @ctx: Array of SDL contexts to populate.
+ * @ctx: Array of contexts to populate.
  * @num_ctx: Number of contexts.
  * @pdf_width: The intrinsic PDF width.
  * @pdf_height: The intrinsic PDF height.
  */
-static int create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
+static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                            double pdf_height) {
     int init_img_width = (int)pdf_width;
     int init_img_height = (int)pdf_height;
@@ -438,15 +462,24 @@ static int create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
     widths[num_ctx - 1] =
         init_img_width - (init_img_width / num_ctx) * (num_ctx - 1);
 
-    for (int i = 0; i < num_ctx; i++) {
-        char title[32];
+    /* Create the first window normally */
+    char title[32];
+    snprintf(title, sizeof(title), "Context %d", 0);
+    ctx[0].window = create_window(title, widths[0], init_img_height, NULL);
+    if (!ctx[0].window) {
+        fprintf(stderr, "Failed to create GLFW window for context 0\n");
+        return -EIO;
+    }
+    /* Create remaining windows sharing the first window's context */
+    for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
-        ctx[i].window = create_window(title, widths[i], init_img_height);
+        ctx[i].window =
+            create_window(title, widths[i], init_img_height, ctx[0].window);
         if (!ctx[i].window) {
-            fprintf(stderr, "Failed to create SDL window for context %d: %s\n",
-                    i, SDL_GetError());
+            fprintf(stderr, "Failed to create GLFW window for context %d\n", i);
             for (int j = 0; j < i; j++) {
-                SDL_DestroyWindow(ctx[j].window);
+                if (ctx[j].window)
+                    glfwDestroyWindow(ctx[j].window);
             }
             return -EIO;
         }
@@ -455,188 +488,137 @@ static int create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
 }
 
 /**
- * Create SDL renderers for the provided contexts.
+ * Create renderers for the provided contexts.
  *
- * @ctx: Array of SDL contexts.
- * @num_ctx: Number of contexts.
+ * Note: With GLFW the window’s OpenGL context is used, so no separate renderer
+ * is needed.
  */
-static int create_context_renderers(struct sdl_ctx ctx[], int num_ctx) {
-    for (int i = 0; i < num_ctx; i++) {
-        ctx[i].renderer = SDL_CreateRenderer(ctx[i].window, -1,
-                                             SDL_RENDERER_ACCELERATED |
-                                                 SDL_RENDERER_PRESENTVSYNC);
-        if (!ctx[i].renderer) {
-            fprintf(stderr,
-                    "Failed to create SDL renderer for context %d: %s\n", i,
-                    SDL_GetError());
-            for (int j = 0; j < i; j++) {
-                if (ctx[j].renderer)
-                    SDL_DestroyRenderer(ctx[j].renderer);
-            }
-            return -EIO;
-        }
-    }
+static int create_context_renderers(struct gl_ctx ctx[], int num_ctx) {
+    (void)ctx;
+    (void)num_ctx;
     return 0;
 }
 
+static void key_callback(GLFWwindow *window, int key, int scancode, int action,
+                         int mods) {
+    (void)scancode;
+    (void)mods;
+    if (action == GLFW_PRESS) {
+        struct prog_state *state =
+            (struct prog_state *)glfwGetWindowUserPointer(window);
+        if (key == GLFW_KEY_Q) {
+            if (state->pending_quit) {
+                for (int i = 0; i < state->num_ctx; i++) {
+                    glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
+                }
+            } else {
+                state->pending_quit = 1;
+            }
+        } else {
+            state->pending_quit = 0;
+            int new_page = state->current_page;
+            if (key == GLFW_KEY_LEFT || key == GLFW_KEY_UP ||
+                key == GLFW_KEY_PAGE_UP) {
+                if (state->current_page > 0)
+                    new_page = state->current_page - 1;
+            } else if (key == GLFW_KEY_RIGHT || key == GLFW_KEY_DOWN ||
+                       key == GLFW_KEY_PAGE_DOWN) {
+                if (state->current_page < state->num_pages - 1)
+                    new_page = state->current_page + 1;
+            }
+            if (new_page != state->current_page) {
+                if (state->cache_entries[new_page] == NULL) {
+                    fprintf(
+                        stderr,
+                        "Warning: Page %d not cached; performing blocking render.\n",
+                        new_page);
+                    state->cache_entries[new_page] =
+                        create_cache_entry(new_page, state);
+                }
+                if (state->cache_entries[new_page]) {
+                    state->current_page = new_page;
+                } else {
+                    fprintf(stderr, "Error rendering page %d\n", new_page);
+                }
+            }
+        }
+    }
+}
+
 /**
- * Handle SDL events in a loop, including key and window events, and render page
- * changes.
+ * Framebuffer size callback to handle window resize events.
+ */
+static void framebuffer_size_callback(GLFWwindow *window, int width,
+                                      int height) {
+    (void)width;
+    (void)height;
+    struct prog_state *state =
+        (struct prog_state *)glfwGetWindowUserPointer(window);
+    double new_scale = compute_scale(state->ctx, state->num_ctx,
+                                     state->pdf_width, state->pdf_height);
+    if (fabs(new_scale - state->current_scale) > 0.01) {
+        state->current_scale = new_scale;
+        fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
+        free_all_cache_entries(state->cache_entries, state->num_pages);
+        state->cache_complete = 0;
+        fprintf(stderr, "Cache invalidated due to window resize.\n");
+        state->cache_entries[state->current_page] =
+            create_cache_entry(state->current_page, state);
+    }
+}
+
+/**
+ * Handle GLFW events in a loop, including key and window events, and render
+ * page changes.
  *
  * @state: Pointer to the program state.
- * @num_pages: The total number of pages in the PDF.
  */
-static int handle_sdl_events(struct prog_state *state, int num_pages) {
-    int running = 1;
-    int pending_quit = 0;
-    int current_page = 0;
-    Uint32 window_ids[NUM_CONTEXTS];
+static int handle_glfw_events(struct prog_state *state) {
     for (int i = 0; i < state->num_ctx; i++) {
-        window_ids[i] = SDL_GetWindowID(state->ctx[i].window);
-    }
-    Uint32 last_activity = SDL_GetTicks();
-
-    struct render_cache_entry **cache_entries =
-        calloc(num_pages, sizeof(struct render_cache_entry *));
-    if (!cache_entries) {
-        fprintf(stderr, "Failed to allocate cache entries array.\n");
-        return -ENOMEM;
+        glfwSetKeyCallback(state->ctx[i].window, key_callback);
+        glfwSetFramebufferSizeCallback(state->ctx[i].window,
+                                       framebuffer_size_callback);
+        glfwSetWindowUserPointer(state->ctx[i].window, state);
     }
 
-    cache_entries[current_page] =
-        create_cache_entry(current_page, state, state->ctx, state->num_ctx);
-    if (cache_entries[current_page]) {
+    glfwMakeContextCurrent(state->ctx[0].window);
+
+    // The first page is rendered blocking, the rest are cached
+    state->cache_entries[state->current_page] =
+        create_cache_entry(state->current_page, state);
+    if (state->cache_entries[state->current_page]) {
         for (int i = 0; i < state->num_ctx; i++) {
-            state->ctx[i].texture.texture =
-                cache_entries[current_page]->textures[i];
-            state->ctx[i].texture.natural_width =
-                cache_entries[current_page]->widths[i];
-            state->ctx[i].texture.natural_height =
-                cache_entries[current_page]->texture_height;
-            present_texture(state->ctx[i].renderer,
-                            state->ctx[i].texture.texture,
-                            state->ctx[i].texture.natural_width,
-                            state->ctx[i].texture.natural_height);
+            glfwMakeContextCurrent(state->ctx[i].window);
+            present_texture(
+                state->ctx[i].window,
+                state->cache_entries[state->current_page]->textures[i],
+                state->cache_entries[state->current_page]->widths[i],
+                state->cache_entries[state->current_page]->texture_height);
         }
     }
 
-    while (running) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_QUIT:
-                    running = 0;
-                    break;
-                case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_q) {
-                        if (pending_quit)
-                            running = 0;
-                        else
-                            pending_quit = 1;
-                    } else {
-                        pending_quit = 0;
-                        int new_page = current_page;
-                        if (event.key.keysym.sym == SDLK_LEFT ||
-                            event.key.keysym.sym == SDLK_UP ||
-                            event.key.keysym.sym == SDLK_PAGEUP) {
-                            if (current_page > 0)
-                                new_page = current_page - 1;
-                        } else if (event.key.keysym.sym == SDLK_RIGHT ||
-                                   event.key.keysym.sym == SDLK_DOWN ||
-                                   event.key.keysym.sym == SDLK_PAGEDOWN) {
-                            if (current_page < num_pages - 1)
-                                new_page = current_page + 1;
-                        }
-                        if (new_page != current_page) {
-                            if (cache_entries[new_page] == NULL) {
-                                cache_entries[new_page] = create_cache_entry(
-                                    new_page, state, state->ctx,
-                                    state->num_ctx);
-                            }
-                            if (cache_entries[new_page]) {
-                                current_page = new_page;
-                                last_activity = SDL_GetTicks();
-                                for (int i = 0; i < state->num_ctx; i++) {
-                                    state->ctx[i].texture.texture =
-                                        cache_entries[current_page]
-                                            ->textures[i];
-                                    state->ctx[i].texture.natural_width =
-                                        cache_entries[current_page]->widths[i];
-                                    state->ctx[i].texture.natural_height =
-                                        cache_entries[current_page]
-                                            ->texture_height;
-                                    present_texture(
-                                        state->ctx[i].renderer,
-                                        state->ctx[i].texture.texture,
-                                        state->ctx[i].texture.natural_width,
-                                        state->ctx[i].texture.natural_height);
-                                }
-                            } else {
-                                fprintf(stderr, "Error rendering page %d\n",
-                                        new_page);
-                            }
-                        }
-                    }
-                    break;
-                case SDL_WINDOWEVENT:
-                    if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
-                        double new_scale =
-                            compute_scale(state->ctx, state->num_ctx,
-                                          state->pdf_width, state->pdf_height);
-                        if (fabs(new_scale - state->current_scale) > 0.01) {
-                            state->current_scale = new_scale;
-                            fprintf(stderr, "Window resized, new scale: %.2f\n",
-                                    new_scale);
-                            free_all_cache_entries(cache_entries, num_pages);
-                            state->cache_complete = 0;
-                            cache_entries[current_page] =
-                                create_cache_entry(current_page, state,
-                                                   state->ctx, state->num_ctx);
-                            if (cache_entries[current_page]) {
-                                for (int i = 0; i < state->num_ctx; i++) {
-                                    state->ctx[i].texture.texture =
-                                        cache_entries[current_page]
-                                            ->textures[i];
-                                    state->ctx[i].texture.natural_width =
-                                        cache_entries[current_page]->widths[i];
-                                    state->ctx[i].texture.natural_height =
-                                        cache_entries[current_page]
-                                            ->texture_height;
-                                    present_texture(
-                                        state->ctx[i].renderer,
-                                        state->ctx[i].texture.texture,
-                                        state->ctx[i].texture.natural_width,
-                                        state->ctx[i].texture.natural_height);
-                                }
-                            }
-                        }
-                    } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED ||
-                               event.window.event == SDL_WINDOWEVENT_SHOWN ||
-                               event.window.event == SDL_WINDOWEVENT_RESTORED) {
-                        for (int i = 0; i < state->num_ctx; i++) {
-                            if (event.window.windowID == window_ids[i])
-                                present_texture(
-                                    state->ctx[i].renderer,
-                                    state->ctx[i].texture.texture,
-                                    state->ctx[i].texture.natural_width,
-                                    state->ctx[i].texture.natural_height);
-                        }
-                    }
-                    break;
-                default:
-                    break;
+    while (!glfwWindowShouldClose(state->ctx[0].window)) {
+        if (state->cache_complete) {
+            glfwWaitEvents();
+        } else {
+            // Allow a keypress to interrupt caching
+            glfwWaitEventsTimeout(0.01);
+            cache_one_slide(state->cache_entries, state->num_pages, state);
+        }
+
+        if (state->cache_entries[state->current_page]) {
+            for (int i = 0; i < state->num_ctx; i++) {
+                glfwMakeContextCurrent(state->ctx[i].window);
+                present_texture(
+                    state->ctx[i].window,
+                    state->cache_entries[state->current_page]->textures[i],
+                    state->cache_entries[state->current_page]->widths[i],
+                    state->cache_entries[state->current_page]->texture_height);
             }
         }
-
-        if (SDL_GetTicks() - last_activity > 50) {
-            cache_one_slide(cache_entries, num_pages, state);
-        }
-
-        SDL_Delay(10);
     }
-
-    free_all_cache_entries(cache_entries, num_pages);
-    free(cache_entries);
+    free_all_cache_entries(state->cache_entries, state->num_pages);
+    free(state->cache_entries);
     return 0;
 }
 
@@ -648,36 +630,50 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
-
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL could not initialise: %s\n", SDL_GetError());
+    if (!glfwInit()) {
+        fprintf(stderr, "GLFW could not initialise\n");
         return EXIT_FAILURE;
     }
 
     struct prog_state ps;
     ret = init_prog_state(&ps, argv[1]);
     if (ret < 0) {
-        SDL_Quit();
+        glfwTerminate();
         return EXIT_FAILURE;
     }
 
     ps.num_ctx = NUM_CONTEXTS;
-    ps.ctx = calloc(ps.num_ctx, sizeof(struct sdl_ctx));
-    if (!ps.ctx) {
-        fprintf(stderr, "Failed to allocate SDL contexts.\n");
+    ps.current_page = 0;
+    ps.pending_quit = 0;
+    ps.num_pages = poppler_document_get_n_pages(ps.document);
+    ps.cache_entries =
+        calloc(ps.num_pages, sizeof(struct render_cache_entry *));
+    if (!ps.cache_entries) {
+        fprintf(stderr, "Failed to allocate cache entries array.\n");
         if (ps.document) {
             g_object_unref(ps.document);
             ps.document = NULL;
         }
-        SDL_Quit();
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+
+    ps.ctx = calloc(ps.num_ctx, sizeof(struct gl_ctx));
+    if (!ps.ctx) {
+        fprintf(stderr, "Failed to allocate contexts.\n");
+        if (ps.document) {
+            g_object_unref(ps.document);
+            ps.document = NULL;
+        }
+        free(ps.cache_entries);
+        glfwTerminate();
         return EXIT_FAILURE;
     }
 
     ret = create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
     if (ret < 0) {
         free(ps.ctx);
-        SDL_Quit();
+        glfwTerminate();
         return EXIT_FAILURE;
     }
 
@@ -685,20 +681,19 @@ int main(int argc, char *argv[]) {
     if (ret < 0) {
         for (int i = 0; i < ps.num_ctx; i++) {
             if (ps.ctx[i].window)
-                SDL_DestroyWindow(ps.ctx[i].window);
+                glfwDestroyWindow(ps.ctx[i].window);
         }
         free(ps.ctx);
-        SDL_Quit();
+        glfwTerminate();
         return EXIT_FAILURE;
     }
 
     ps.current_scale =
         compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
 
-    int num_pages = poppler_document_get_n_pages(ps.document);
-    ret = handle_sdl_events(&ps, num_pages);
+    ret = handle_glfw_events(&ps);
     if (ret < 0) {
-        SDL_Quit();
+        glfwTerminate();
         return EXIT_FAILURE;
     }
 
@@ -708,12 +703,10 @@ int main(int argc, char *argv[]) {
     }
 
     for (int i = 0; i < ps.num_ctx; i++) {
-        if (ps.ctx[i].renderer)
-            SDL_DestroyRenderer(ps.ctx[i].renderer);
         if (ps.ctx[i].window)
-            SDL_DestroyWindow(ps.ctx[i].window);
+            glfwDestroyWindow(ps.ctx[i].window);
     }
     free(ps.ctx);
-    SDL_Quit();
+    glfwTerminate();
     return EXIT_SUCCESS;
 }
