@@ -253,23 +253,16 @@ static GLuint create_gl_texture_from_cairo(cairo_surface_t *cairo_surface,
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
 
-    _drop_(free) unsigned char *buffer = malloc(region_width * img_height * 4);
-    if (!buffer) {
-        fprintf(stderr, "Failed to allocate buffer for texture\n");
-        return 0;
-    }
-    for (int y = 0; y < img_height; y++) {
-        unsigned char *src_row = cairo_data + y * cairo_stride + x_offset * 4;
-        memcpy(buffer + y * region_width * 4, src_row, region_width * 4);
-    }
-
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    int row_length = cairo_stride / 4;
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_width, img_height, 0,
-                 GL_BGRA, GL_UNSIGNED_BYTE, buffer);
+                 GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + x_offset * 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     return texture;
 }
 
