@@ -141,16 +141,27 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f);
-    glVertex2i(dst_x, dst_y);
-    glTexCoord2f(1.0f, 0.0f);
-    glVertex2i(dst_x + new_width, dst_y);
-    glTexCoord2f(1.0f, 1.0f);
-    glVertex2i(dst_x + new_width, dst_y + new_height);
-    glTexCoord2f(0.0f, 1.0f);
-    glVertex2i(dst_x, dst_y + new_height);
-    glEnd();
+    GLfloat vertices[] = {
+        (GLfloat)dst_x, (GLfloat)dst_y,
+        (GLfloat)(dst_x + new_width), (GLfloat)dst_y,
+        (GLfloat)(dst_x + new_width), (GLfloat)(dst_y + new_height),
+        (GLfloat)dst_x, (GLfloat)(dst_y + new_height)
+    };
+
+    GLfloat tex_coords[] = {
+        0.0f, 0.0f,
+        1.0f, 0.0f,
+        1.0f, 1.0f,
+        0.0f, 1.0f
+    };
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, vertices);
+    glTexCoordPointer(2, GL_FLOAT, 0, tex_coords);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 
     glDisable(GL_TEXTURE_2D);
     glfwSwapBuffers(window);
