@@ -11,20 +11,10 @@
 
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
-#define DEFINE_DROP_FUNC_PTR(type, func)                                       \
-    static inline void drop_##func(type *p) { func(p); }
-
 #define DEFINE_DROP_FUNC(type, func)                                           \
     static inline void drop_##func(type *p) {                                  \
         if (*p)                                                                \
             func(*p);                                                          \
-    }
-
-#define DEFINE_DROP_FUNC_VOID(func)                                            \
-    static inline void drop_##func(void *p) {                                  \
-        void **pp = p;                                                         \
-        if (*pp)                                                               \
-            func(*pp);                                                         \
     }
 
 #define DEFINE_DROP_FUNC_COERCE(type, func)                                    \
