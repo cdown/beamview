@@ -221,20 +221,19 @@ struct render_cache_entry {
 };
 
 /**
- * Holds cached pages for previous, current, and next slides.
+ * Free a render cache entry and its associated textures.
  *
- * If a slide does not exist (e.g., at the beginning or end), the pointer is
- * NULL.
- *
- * @prev: Cache entry for the previous page.
- * @cur: Cache entry for the current page.
- * @next: Cache entry for the next page.
+ * @entry: The render cache entry to free.
  */
-struct render_cache {
-    struct render_cache_entry *prev;
-    struct render_cache_entry *cur;
-    struct render_cache_entry *next;
-};
+static void free_cache_entry(struct render_cache_entry *entry) {
+    if (!entry)
+        return;
+    for (int i = 0; i < NUM_CONTEXTS; i++) {
+        if (entry->textures[i])
+            SDL_DestroyTexture(entry->textures[i]);
+    }
+    free(entry);
+}
 
 /**
  * Render and create a cache entry for a given page index.
@@ -310,118 +309,40 @@ static struct render_cache_entry *create_cache_entry(int page_index,
 }
 
 /**
- * Free a render cache entry and its associated textures.
+ * Free all cache entries in the provided cache array.
  *
- * @entry: The render cache entry to free.
+ * @cache_entries: Array of cache entries.
+ * @num_pages: Total number of pages.
  */
-static void free_cache_entry(struct render_cache_entry *entry) {
-    if (!entry)
-        return;
-    for (int i = 0; i < NUM_CONTEXTS; i++) {
-        if (entry->textures[i])
-            SDL_DestroyTexture(entry->textures[i]);
+static void free_all_cache_entries(struct render_cache_entry **cache_entries,
+                                   int num_pages) {
+    for (int i = 0; i < num_pages; i++) {
+        if (cache_entries[i]) {
+            free_cache_entry(cache_entries[i]);
+            cache_entries[i] = NULL;
+        }
     }
-    free(entry);
 }
 
 /**
- * Initialise the cache for the current page.
+ * When idle (i.e., no events for 50ms), update the cache by creating any
+ * missing cache entries.
  *
- * This renders the current page synchronously and clears any neighbour entries.
+ * Renders one missing page per idle cycle.
  *
- * @cache: The render cache to initialise.
- * @current_page: The current page index.
- * @state: Pointer to the program state.
- */
-static void init_cache_for_page(struct render_cache *cache, int current_page,
-                                struct prog_state *state) {
-    if (cache->prev) {
-        free_cache_entry(cache->prev);
-        cache->prev = NULL;
-    }
-    if (cache->cur) {
-        free_cache_entry(cache->cur);
-        cache->cur = NULL;
-    }
-    if (cache->next) {
-        free_cache_entry(cache->next);
-        cache->next = NULL;
-    }
-    cache->cur =
-        create_cache_entry(current_page, state, state->ctx, state->num_ctx);
-}
-
-/**
- * When idle (i.e., no events for 50ms), update the cache by creating neighbour
- * entries if needed.
- *
- * @cache: The render cache structure.
- * @current_page: The current page index.
- * @state: Pointer to the program state.
+ * @cache_entries: Array of cache entries.
  * @num_pages: The total number of pages in the document.
- */
-static void update_cache(struct render_cache *cache, int current_page,
-                         struct prog_state *state, int num_pages) {
-    if (cache->cur == NULL)
-        return;
-    if (current_page > 0 && cache->prev == NULL) {
-        cache->prev = create_cache_entry(current_page - 1, state, state->ctx,
-                                         state->num_ctx);
-    }
-    if (current_page < num_pages - 1 && cache->next == NULL) {
-        cache->next = create_cache_entry(current_page + 1, state, state->ctx,
-                                         state->num_ctx);
-    }
-}
-
-/**
- * Update the cache when a page change occurs.
- *
- * If the new page is already cached (in prev or next), shift the cache window.
- * Otherwise, reinitialise the cache for the new page, rendering only the
- * current page. Note: neighbour pages are not pre-rendered during keypress;
- * update_cache will handle that during idle.
- */
-static void shift_cache_entries(struct render_cache *cache, int new_page,
-                                struct prog_state *state) {
-    if (cache->cur && cache->cur->page_index == new_page) {
-        // Cache is already current?
-        return;
-    }
-    if (cache->next && cache->next->page_index == new_page) {
-        if (cache->prev) {
-            free_cache_entry(cache->prev);
-        }
-        cache->prev = cache->cur;
-        cache->cur = cache->next;
-        cache->next = NULL;
-        return;
-    }
-    if (cache->prev && cache->prev->page_index == new_page) {
-        if (cache->next) {
-            free_cache_entry(cache->next);
-        }
-        cache->next = cache->cur;
-        cache->cur = cache->prev;
-        cache->prev = NULL;
-        return;
-    }
-    fprintf(stderr, "Cache not ready for page %d\n", new_page);
-    init_cache_for_page(cache, new_page, state);
-}
-
-/**
- * Apply the textures from the current cache entry to the program state.
- *
  * @state: Pointer to the program state.
- * @entry: The current cache entry.
  */
-static void apply_cache_entry_to_state(struct prog_state *state,
-                                       struct render_cache_entry *entry) {
-    for (int i = 0; i < state->num_ctx; i++) {
-        state->ctx[i].texture.texture = entry->textures[i];
-        state->ctx[i].texture.natural_width = entry->widths[i];
-        state->ctx[i].texture.natural_height = entry->texture_height;
+static void cache_one_slide(struct render_cache_entry **cache_entries,
+                            int num_pages, struct prog_state *state) {
+    for (int i = 0; i < num_pages; i++) {
+        if (cache_entries[i] == NULL) {
+            cache_entries[i] =
+                create_cache_entry(i, state, state->ctx, state->num_ctx);
+            // Render one missing slide per idle cycle.
+            break;
+        }
     }
 }
 
@@ -563,11 +484,23 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
     }
     Uint32 last_activity = SDL_GetTicks();
 
-    struct render_cache cache = {0};
-    init_cache_for_page(&cache, 0, state);
-    if (cache.cur) {
-        apply_cache_entry_to_state(state, cache.cur);
+    struct render_cache_entry **cache_entries =
+        calloc(num_pages, sizeof(struct render_cache_entry *));
+    if (!cache_entries) {
+        fprintf(stderr, "Failed to allocate cache entries array.\n");
+        return -ENOMEM;
+    }
+
+    cache_entries[current_page] =
+        create_cache_entry(current_page, state, state->ctx, state->num_ctx);
+    if (cache_entries[current_page]) {
         for (int i = 0; i < state->num_ctx; i++) {
+            state->ctx[i].texture.texture =
+                cache_entries[current_page]->textures[i];
+            state->ctx[i].texture.natural_width =
+                cache_entries[current_page]->widths[i];
+            state->ctx[i].texture.natural_height =
+                cache_entries[current_page]->texture_height;
             present_texture(state->ctx[i].renderer,
                             state->ctx[i].texture.texture,
                             state->ctx[i].texture.natural_width,
@@ -603,14 +536,23 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
                                 new_page = current_page + 1;
                         }
                         if (new_page != current_page) {
-                            current_page = new_page;
-                            last_activity = SDL_GetTicks();
-                            // Update only the current page; neighbour updates
-                            // are deferred until idle
-                            shift_cache_entries(&cache, current_page, state);
-                            if (cache.cur) {
-                                apply_cache_entry_to_state(state, cache.cur);
+                            if (cache_entries[new_page] == NULL) {
+                                cache_entries[new_page] = create_cache_entry(
+                                    new_page, state, state->ctx,
+                                    state->num_ctx);
+                            }
+                            if (cache_entries[new_page]) {
+                                current_page = new_page;
+                                last_activity = SDL_GetTicks();
                                 for (int i = 0; i < state->num_ctx; i++) {
+                                    state->ctx[i].texture.texture =
+                                        cache_entries[current_page]
+                                            ->textures[i];
+                                    state->ctx[i].texture.natural_width =
+                                        cache_entries[current_page]->widths[i];
+                                    state->ctx[i].texture.natural_height =
+                                        cache_entries[current_page]
+                                            ->texture_height;
                                     present_texture(
                                         state->ctx[i].renderer,
                                         state->ctx[i].texture.texture,
@@ -619,7 +561,7 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
                                 }
                             } else {
                                 fprintf(stderr, "Error rendering page %d\n",
-                                        current_page);
+                                        new_page);
                             }
                         }
                     }
@@ -633,10 +575,20 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
                             state->current_scale = new_scale;
                             fprintf(stderr, "Window resized, new scale: %.2f\n",
                                     new_scale);
-                            init_cache_for_page(&cache, current_page, state);
-                            if (cache.cur) {
-                                apply_cache_entry_to_state(state, cache.cur);
+                            free_all_cache_entries(cache_entries, num_pages);
+                            cache_entries[current_page] =
+                                create_cache_entry(current_page, state,
+                                                   state->ctx, state->num_ctx);
+                            if (cache_entries[current_page]) {
                                 for (int i = 0; i < state->num_ctx; i++) {
+                                    state->ctx[i].texture.texture =
+                                        cache_entries[current_page]
+                                            ->textures[i];
+                                    state->ctx[i].texture.natural_width =
+                                        cache_entries[current_page]->widths[i];
+                                    state->ctx[i].texture.natural_height =
+                                        cache_entries[current_page]
+                                            ->texture_height;
                                     present_texture(
                                         state->ctx[i].renderer,
                                         state->ctx[i].texture.texture,
@@ -664,19 +616,14 @@ static int handle_sdl_events(struct prog_state *state, int num_pages) {
         }
 
         if (SDL_GetTicks() - last_activity > 50) {
-            update_cache(&cache, current_page, state, num_pages);
+            cache_one_slide(cache_entries, num_pages, state);
         }
 
         SDL_Delay(10);
     }
 
-    if (cache.prev)
-        free_cache_entry(cache.prev);
-    if (cache.cur)
-        free_cache_entry(cache.cur);
-    if (cache.next)
-        free_cache_entry(cache.next);
-
+    free_all_cache_entries(cache_entries, num_pages);
+    free(cache_entries);
     return 0;
 }
 
