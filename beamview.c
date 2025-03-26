@@ -154,6 +154,11 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
     cairo_t *cr = cairo_create(surface);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
+
+    // If the background is transparent, the user probably expects white
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_paint(cr);
+
     cairo_scale(cr, scale, scale);
     poppler_page_render(page, cr);
     cairo_surface_flush(surface);
