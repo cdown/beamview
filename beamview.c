@@ -69,9 +69,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     int new_width = (int)(natural_width * scale);
     int new_height = (int)(natural_height * scale);
 
-    int dst_x = (win_width - new_width) / 2;
-    int dst_y = (win_height - new_height) / 2;
-
     glfwMakeContextCurrent(window);
     glViewport(0, 0, win_width, win_height);
     glClearColor(0, 0, 0, 1);
@@ -83,14 +80,11 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    GLfloat vertices[] = {(GLfloat)dst_x,
-                          (GLfloat)dst_y,
-                          (GLfloat)(dst_x + new_width),
-                          (GLfloat)dst_y,
-                          (GLfloat)(dst_x + new_width),
-                          (GLfloat)(dst_y + new_height),
-                          (GLfloat)dst_x,
-                          (GLfloat)(dst_y + new_height)};
+    const GLfloat left = (GLfloat)((win_width - new_width) / 2);
+    const GLfloat top = (GLfloat)((win_height - new_height) / 2);
+    const GLfloat right = left + new_width;
+    const GLfloat bottom = top + new_height;
+    GLfloat vertices[] = {left, top, right, top, right, bottom, left, bottom};
     GLfloat tex_coords[] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
 
     glEnableClientState(GL_VERTEX_ARRAY);
