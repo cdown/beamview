@@ -80,8 +80,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, win_width, win_height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
