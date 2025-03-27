@@ -55,7 +55,7 @@ struct prog_state {
     int num_ctx;
     double pdf_width, pdf_height, current_scale;
     PopplerDocument *document;
-    int cache_complete, current_page, pending_quit, num_pages;
+    int cache_complete, current_page, num_pages;
     struct render_cache_entry **cache_entries;
 };
 
@@ -307,19 +307,15 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
 }
 
 static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
-                         int action, _unused_ int mods) {
+                         int action, int mods) {
     if (action == GLFW_PRESS) {
         struct prog_state *state = glfwGetWindowUserPointer(window);
-        if (key == GLFW_KEY_Q) {
-            if (state->pending_quit) {
-                for (int i = 0; i < state->num_ctx; i++) {
-                    glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
-                }
-            } else {
-                state->pending_quit = 1;
+        if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
+            // Uppercase Q (with Shift) quits immediately.
+            for (int i = 0; i < state->num_ctx; i++) {
+                glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
             }
         } else {
-            state->pending_quit = 0;
             int new_page = state->current_page;
             if (key == GLFW_KEY_LEFT || key == GLFW_KEY_UP ||
                 key == GLFW_KEY_PAGE_UP) {
