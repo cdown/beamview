@@ -21,12 +21,6 @@
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 #define _unused_ __attribute__((unused))
 
-static inline void drop_free(void *pptr) {
-    void **ptr = pptr;
-    if (*ptr)
-        free(*ptr);
-}
-
 static inline void drop_cairo_surface_destroy(cairo_surface_t **surface) {
     if (*surface)
         cairo_surface_destroy(*surface);
