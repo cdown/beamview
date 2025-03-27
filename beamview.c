@@ -393,11 +393,6 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     return 0;
 }
 
-static GLFWwindow *create_window(const char *title, int width, int height,
-                                 GLFWwindow *share) {
-    return glfwCreateWindow(width, height, title, NULL, share);
-}
-
 static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                            double pdf_height,
                            enum split_orientation orientation) {
@@ -419,10 +414,12 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     char title[32];
     if (orientation == SPLIT_HORIZONTAL) {
         snprintf(title, sizeof(title), "Context %d", 0);
-        ctx[0].window = create_window(title, sizes[0], init_other, NULL);
+        ctx[0].window =
+            glfwCreateWindow(sizes[0], init_other, title, NULL, NULL);
     } else {
         snprintf(title, sizeof(title), "Context %d", 0);
-        ctx[0].window = create_window(title, init_other, sizes[0], NULL);
+        ctx[0].window =
+            glfwCreateWindow(init_other, sizes[0], title, NULL, NULL);
     }
     if (!ctx[0].window) {
         fprintf(stderr, "Failed to create GLFW window for context 0\n");
@@ -431,11 +428,11 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
         if (orientation == SPLIT_HORIZONTAL)
-            ctx[i].window =
-                create_window(title, sizes[i], init_other, ctx[0].window);
+            ctx[i].window = glfwCreateWindow(sizes[i], init_other, title, NULL,
+                                             ctx[0].window);
         else
-            ctx[i].window =
-                create_window(title, init_other, sizes[i], ctx[0].window);
+            ctx[i].window = glfwCreateWindow(init_other, sizes[i], title, NULL,
+                                             ctx[0].window);
         if (!ctx[i].window) {
             fprintf(stderr, "Failed to create GLFW window for context %d\n", i);
             for (int j = 0; j < i; j++) {
