@@ -301,22 +301,12 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     snprintf(title, sizeof(title), "Context %d", 0);
     ctx[0].window =
         glfwCreateWindow(sizes[0], (int)pdf_height, title, NULL, NULL);
-    if (!ctx[0].window) {
-        fprintf(stderr, "Failed to create GLFW window for context 0\n");
-        return -EIO;
-    }
+    expect(ctx[0].window);
     for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
         ctx[i].window = glfwCreateWindow(sizes[i], (int)pdf_height, title, NULL,
                                          ctx[0].window);
-        if (!ctx[i].window) {
-            fprintf(stderr, "Failed to create GLFW window for context %d\n", i);
-            for (int j = 0; j < i; j++) {
-                if (ctx[j].window)
-                    glfwDestroyWindow(ctx[j].window);
-            }
-            return -EIO;
-        }
+        expect(ctx[i].window);
     }
     return 0;
 }
