@@ -363,7 +363,6 @@ static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
         fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
         free_all_cache_entries(state->cache_entries, state->num_pages);
         state->cache_complete = 0;
-        fprintf(stderr, "Cache invalidated due to window resize.\n");
         state->cache_entries[state->current_page] =
             create_cache_entry(state->current_page, state);
     }
