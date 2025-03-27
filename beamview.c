@@ -423,11 +423,7 @@ int main(int argc, char *argv[]) {
 
     expect(handle_glfw_events(&ps) == 0);
 
-    if (ps.document) {
-        g_object_unref(ps.document);
-        ps.document = NULL;
-    }
-
+    g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
         if (ps.ctx[i].window)
             glfwDestroyWindow(ps.ctx[i].window);
