@@ -272,8 +272,8 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     return 0;
 }
 
-static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
-                           double pdf_height) {
+static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
+                            double pdf_height) {
     int sizes[num_ctx];
     int base = (int)pdf_width / num_ctx;
     for (int i = 0; i < num_ctx; i++) {
@@ -292,7 +292,6 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                                          ctx[0].window);
         expect(ctx[i].window);
     }
-    return 0;
 }
 
 static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
@@ -357,7 +356,7 @@ void update_window_textures(struct prog_state *state) {
     }
 }
 
-static int handle_glfw_events(struct prog_state *state) {
+static void handle_glfw_events(struct prog_state *state) {
     for (int i = 0; i < state->num_ctx; i++) {
         glfwSetKeyCallback(state->ctx[i].window, key_callback);
         glfwSetFramebufferSizeCallback(state->ctx[i].window,
@@ -387,7 +386,6 @@ static int handle_glfw_events(struct prog_state *state) {
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
     free(state->cache_entries);
-    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -409,13 +407,12 @@ int main(int argc, char *argv[]) {
     expect(ps.cache_entries);
     ps.ctx = calloc(ps.num_ctx, sizeof(struct gl_ctx));
     expect(ps.ctx);
-    expect(create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height) ==
-           0);
+    create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
 
     ps.current_scale =
         compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
 
-    expect(handle_glfw_events(&ps) == 0);
+    handle_glfw_events(&ps);
 
     g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
