@@ -334,15 +334,11 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     sizes[num_ctx - 1] = total - base * (num_ctx - 1);
 
     char title[32];
-    if (orientation == SPLIT_HORIZONTAL) {
-        snprintf(title, sizeof(title), "Context %d", 0);
-        ctx[0].window =
-            glfwCreateWindow(sizes[0], init_other, title, NULL, NULL);
-    } else {
-        snprintf(title, sizeof(title), "Context %d", 0);
-        ctx[0].window =
-            glfwCreateWindow(init_other, sizes[0], title, NULL, NULL);
-    }
+    snprintf(title, sizeof(title), "Context %d", 0);
+    ctx[0].window =
+        (orientation == SPLIT_HORIZONTAL)
+            ? glfwCreateWindow(sizes[0], init_other, title, NULL, NULL)
+            : glfwCreateWindow(init_other, sizes[0], title, NULL, NULL);
     if (!ctx[0].window) {
         fprintf(stderr, "Failed to create GLFW window for context 0\n");
         return -EIO;
