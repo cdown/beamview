@@ -3,12 +3,9 @@
 #include <cairo.h>
 #include <errno.h>
 #include <glib.h>
-#include <limits.h>
 #include <math.h>
 #include <poppler/glib/poppler.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define expect(x)                                                              \
     do {                                                                       \
