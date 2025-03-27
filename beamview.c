@@ -19,6 +19,7 @@
         }                                                                      \
     } while (0)
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
+#define _unused_ __attribute__((unused))
 
 static inline void drop_free(void *pptr) {
     void **ptr = pptr;
@@ -363,10 +364,8 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     return 0;
 }
 
-static void key_callback(GLFWwindow *window, int key, int scancode, int action,
-                         int mods) {
-    (void)scancode;
-    (void)mods;
+static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
+                         int action, _unused_ int mods) {
     if (action == GLFW_PRESS) {
         struct prog_state *state = glfwGetWindowUserPointer(window);
         if (key == GLFW_KEY_Q) {
@@ -407,10 +406,8 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action,
     }
 }
 
-static void framebuffer_size_callback(GLFWwindow *window, int width,
-                                      int height) {
-    (void)width;
-    (void)height;
+static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
+                                      _unused_ int height) {
     struct prog_state *state = glfwGetWindowUserPointer(window);
     double new_scale =
         compute_scale(state->ctx, state->num_ctx, state->pdf_width,
