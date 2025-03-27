@@ -185,8 +185,7 @@ static GLuint create_gl_texture_from_cairo_region(
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    int row_length = cairo_stride / 4;
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, cairo_stride / 4);
     expect(offset >= 0 && region_size > 0);
 
     if (orientation == SPLIT_HORIZONTAL) {
