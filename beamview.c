@@ -439,5 +439,4 @@ int main(int argc, char *argv[]) {
     }
     free(ps.ctx);
     glfwTerminate();
-    return EXIT_SUCCESS;
 }
