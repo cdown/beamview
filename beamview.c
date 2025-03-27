@@ -167,6 +167,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
 
     cairo_surface_t *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
+    expect(surface);
     cairo_t *cr = cairo_create(surface);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
 
@@ -178,7 +179,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
     poppler_page_render(page, cr);
     cairo_surface_flush(surface);
     cairo_destroy(cr);
-
+    expect(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
     return surface;
 }
 
@@ -192,33 +193,22 @@ static GLuint create_gl_texture_from_cairo_region(
 
     GLuint texture;
     glGenTextures(1, &texture);
+    expect(texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     if (orientation == SPLIT_HORIZONTAL) {
-        if (offset < 0 || region_size <= 0 ||
-            offset + region_size > cairo_width) {
-            fprintf(
-                stderr,
-                "Requested region exceeds cairo surface bounds: offset %d, region_size %d, cairo_width %d\n",
-                offset, region_size, cairo_width);
-            return 0;
-        }
+        expect(offset >= 0 && region_size > 0 &&
+               offset + region_size <= cairo_width);
         int row_length = cairo_stride / 4;
         glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
                      GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     } else { // SPLIT_VERTICAL
-        if (offset < 0 || region_size <= 0 ||
-            offset + region_size > cairo_height) {
-            fprintf(
-                stderr,
-                "Requested region exceeds cairo surface bounds: offset %d, region_size %d, cairo_height %d\n",
-                offset, region_size, cairo_height);
-            return 0;
-        }
+        expect(offset >= 0 && region_size > 0 &&
+               offset + region_size <= cairo_height);
         int row_length = cairo_stride / 4;
         glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, full_width, region_size, 0,
@@ -243,15 +233,13 @@ static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
-    if (!page) {
-        fprintf(stderr, "Failed to get page %d\n", page_index);
-        return NULL;
-    }
+    expect(page);
 
     int img_width, img_height;
     _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
         render_page_to_cairo_surface(page, state->current_scale, &img_width,
                                      &img_height);
+    expect(cairo_surface);
 
     struct render_cache_entry *entry =
         malloc(sizeof(struct render_cache_entry));
@@ -270,18 +258,7 @@ static struct render_cache_entry *create_cache_entry(int page_index,
             entry->textures[i] = create_gl_texture_from_cairo_region(
                 cairo_surface, state->orientation, x_offset, region_width,
                 img_width, img_height);
-            if (!entry->textures[i]) {
-                fprintf(
-                    stderr,
-                    "Failed to create OpenGL texture for page %d, context %d\n",
-                    page_index, i);
-                for (int j = 0; j < i; j++) {
-                    if (entry->textures[j])
-                        glDeleteTextures(1, &entry->textures[j]);
-                }
-                free(entry);
-                return NULL;
-            }
+            expect(entry->textures[i]);
         }
     } else { // SPLIT_VERTICAL
         int base_height = img_height / state->num_ctx;
@@ -294,18 +271,7 @@ static struct render_cache_entry *create_cache_entry(int page_index,
             entry->textures[i] = create_gl_texture_from_cairo_region(
                 cairo_surface, state->orientation, y_offset, region_height,
                 img_width, img_height);
-            if (!entry->textures[i]) {
-                fprintf(
-                    stderr,
-                    "Failed to create OpenGL texture for page %d, context %d\n",
-                    page_index, i);
-                for (int j = 0; j < i; j++) {
-                    if (entry->textures[j])
-                        glDeleteTextures(1, &entry->textures[j]);
-                }
-                free(entry);
-                return NULL;
-            }
+            expect(entry->textures[i]);
         }
         entry->texture_height = img_width;
     }
@@ -371,12 +337,7 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
 
     _drop_(g_object_unref) PopplerPage *first_page =
         poppler_document_get_page(state->document, 0);
-    if (!first_page) {
-        fprintf(stderr, "Failed to load first page.\n");
-        g_object_unref(state->document);
-        state->document = NULL;
-        return -ENOENT;
-    }
+    expect(first_page);
     poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
 
     state->current_scale = 1.0;
