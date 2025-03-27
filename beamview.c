@@ -237,7 +237,7 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
             break;
         }
     }
-    if (complete == 1) {
+    if (complete) {
         fprintf(stderr, "Caching complete.\n");
     }
     state->cache_complete = complete;
