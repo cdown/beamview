@@ -39,7 +39,7 @@ static inline void drop_g_object_unref(void *objp) {
 }
 
 #define NUM_CONTEXTS 2
-enum split_orientation { SPLIT_HORIZONTAL, SPLIT_VERTICAL };
+
 struct texture_data {
     GLuint texture;
     int natural_width, natural_height;
@@ -63,7 +63,6 @@ struct prog_state {
     PopplerDocument *document;
     int cache_complete, current_page, pending_quit, num_pages;
     struct render_cache_entry **cache_entries;
-    enum split_orientation orientation;
 };
 
 static void present_texture(GLFWwindow *window, GLuint texture,
@@ -104,7 +103,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
                           (GLfloat)(dst_y + new_height),
                           (GLfloat)dst_x,
                           (GLfloat)(dst_y + new_height)};
-
     GLfloat tex_coords[] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
 
     glEnableClientState(GL_VERTEX_ARRAY);
@@ -120,8 +118,7 @@ static void present_texture(GLFWwindow *window, GLuint texture,
 }
 
 static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
-                            double pdf_height,
-                            enum split_orientation orientation) {
+                            double pdf_height) {
     if (pdf_width <= 0 || pdf_height <= 0) {
         fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
                 pdf_width, pdf_height);
@@ -131,14 +128,8 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
         glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
-        double scale_i;
-        if (orientation == SPLIT_HORIZONTAL) {
-            scale_i = fmax((double)win_width / (pdf_width / num_ctx),
-                           (double)win_height / pdf_height);
-        } else { // SPLIT_VERTICAL
-            scale_i = fmax((double)win_width / pdf_width,
-                           (double)win_height / (pdf_height / num_ctx));
-        }
+        double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
+                              (double)win_height / pdf_height);
         if (scale_i > scale)
             scale = scale_i;
     }
@@ -172,11 +163,10 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
     return surface;
 }
 
-static GLuint create_gl_texture_from_cairo_region(
-    cairo_surface_t *cairo_surface, enum split_orientation orientation,
-    int offset, int region_size, int full_width, int full_height) {
+static GLuint
+create_gl_texture_from_cairo_region(cairo_surface_t *cairo_surface, int offset,
+                                    int region_size, int full_height) {
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
-    int cairo_height = cairo_image_surface_get_height(cairo_surface);
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
 
@@ -188,17 +178,9 @@ static GLuint create_gl_texture_from_cairo_region(
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, cairo_stride / 4);
     expect(offset >= 0 && region_size > 0);
-
-    if (orientation == SPLIT_HORIZONTAL) {
-        expect(offset + region_size <= cairo_width);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
-                     GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
-    } else { // SPLIT_VERTICAL
-        expect(offset + region_size <= cairo_height);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, full_width, region_size, 0,
-                     GL_BGRA, GL_UNSIGNED_BYTE,
-                     cairo_data + offset * cairo_stride);
-    }
+    expect(offset + region_size <= cairo_width);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
     return texture;
 }
 
@@ -229,21 +211,17 @@ static struct render_cache_entry *create_cache_entry(int page_index,
     expect(entry);
     entry->page_index = page_index;
 
-    int full_split =
-        (state->orientation == SPLIT_HORIZONTAL) ? img_width : img_height;
-    int base_split = full_split / state->num_ctx;
-    entry->texture_height =
-        (state->orientation == SPLIT_HORIZONTAL) ? img_height : img_width;
+    int base_split = img_width / state->num_ctx;
+    entry->texture_height = img_height;
 
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
         int region_size = (i == state->num_ctx - 1)
-                              ? (full_split - base_split * i)
+                              ? (img_width - base_split * i)
                               : base_split;
         entry->widths[i] = region_size;
         entry->textures[i] = create_gl_texture_from_cairo_region(
-            cairo_surface, state->orientation, offset, region_size, img_width,
-            img_height);
+            cairo_surface, offset, region_size, img_height);
         expect(entry->textures[i]);
     }
 
@@ -317,41 +295,26 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
 }
 
 static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
-                           double pdf_height,
-                           enum split_orientation orientation) {
-    int total, init_other;
-    if (orientation == SPLIT_HORIZONTAL) {
-        total = (int)pdf_width;
-        init_other = (int)pdf_height;
-    } else {
-        total = (int)pdf_height;
-        init_other = (int)pdf_width;
-    }
+                           double pdf_height) {
     int sizes[num_ctx];
-    int base = total / num_ctx;
+    int base = (int)pdf_width / num_ctx;
     for (int i = 0; i < num_ctx; i++) {
         sizes[i] = base;
     }
-    sizes[num_ctx - 1] = total - base * (num_ctx - 1);
+    sizes[num_ctx - 1] = (int)pdf_width - base * (num_ctx - 1);
 
     char title[32];
     snprintf(title, sizeof(title), "Context %d", 0);
     ctx[0].window =
-        (orientation == SPLIT_HORIZONTAL)
-            ? glfwCreateWindow(sizes[0], init_other, title, NULL, NULL)
-            : glfwCreateWindow(init_other, sizes[0], title, NULL, NULL);
+        glfwCreateWindow(sizes[0], (int)pdf_height, title, NULL, NULL);
     if (!ctx[0].window) {
         fprintf(stderr, "Failed to create GLFW window for context 0\n");
         return -EIO;
     }
     for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
-        if (orientation == SPLIT_HORIZONTAL)
-            ctx[i].window = glfwCreateWindow(sizes[i], init_other, title, NULL,
-                                             ctx[0].window);
-        else
-            ctx[i].window = glfwCreateWindow(init_other, sizes[i], title, NULL,
-                                             ctx[0].window);
+        ctx[i].window = glfwCreateWindow(sizes[i], (int)pdf_height, title, NULL,
+                                         ctx[0].window);
         if (!ctx[i].window) {
             fprintf(stderr, "Failed to create GLFW window for context %d\n", i);
             for (int j = 0; j < i; j++) {
@@ -409,9 +372,8 @@ static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
 static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
                                       _unused_ int height) {
     struct prog_state *state = glfwGetWindowUserPointer(window);
-    double new_scale =
-        compute_scale(state->ctx, state->num_ctx, state->pdf_width,
-                      state->pdf_height, state->orientation);
+    double new_scale = compute_scale(state->ctx, state->num_ctx,
+                                     state->pdf_width, state->pdf_height);
     if (fabs(new_scale - state->current_scale) > 0.01) {
         state->current_scale = new_scale;
         fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
@@ -428,16 +390,8 @@ void update_window_textures(struct prog_state *state) {
         state->cache_entries[state->current_page];
     for (int i = 0; i < state->num_ctx; i++) {
         glfwMakeContextCurrent(state->ctx[i].window);
-        int natural_width, natural_height;
-        if (state->orientation == SPLIT_HORIZONTAL) {
-            natural_width = entry->widths[i];
-            natural_height = entry->texture_height;
-        } else {
-            natural_width = entry->texture_height;
-            natural_height = entry->widths[i];
-        }
-        present_texture(state->ctx[i].window, entry->textures[i], natural_width,
-                        natural_height);
+        present_texture(state->ctx[i].window, entry->textures[i],
+                        entry->widths[i], entry->texture_height);
     }
 }
 
@@ -476,30 +430,16 @@ static int handle_glfw_events(struct prog_state *state) {
 
 int main(int argc, char *argv[]) {
     const char *pdf_file = NULL;
-    enum split_orientation orientation = SPLIT_HORIZONTAL;
 
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s [-h|-v] <pdf_file>\n", argv[0]);
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <pdf_file>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    if (argc == 3) {
-        if (strcmp(argv[1], "-h") == 0)
-            orientation = SPLIT_HORIZONTAL;
-        else if (strcmp(argv[1], "-v") == 0)
-            orientation = SPLIT_VERTICAL;
-        else {
-            fprintf(stderr, "Unknown option %s\n", argv[1]);
-            return EXIT_FAILURE;
-        }
-        pdf_file = argv[2];
-    } else {
-        pdf_file = argv[1];
-    }
+    pdf_file = argv[1];
 
     expect(glfwInit());
     struct prog_state ps = {0};
     expect(init_prog_state(&ps, pdf_file) == 0);
-    ps.orientation = orientation;
     ps.num_ctx = NUM_CONTEXTS;
     ps.num_pages = poppler_document_get_n_pages(ps.document);
     ps.cache_entries =
@@ -507,11 +447,11 @@ int main(int argc, char *argv[]) {
     expect(ps.cache_entries);
     ps.ctx = calloc(ps.num_ctx, sizeof(struct gl_ctx));
     expect(ps.ctx);
-    expect(create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height,
-                           ps.orientation) == 0);
+    expect(create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height) ==
+           0);
 
-    ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width,
-                                     ps.pdf_height, ps.orientation);
+    ps.current_scale =
+        compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
 
     expect(handle_glfw_events(&ps) == 0);
 
