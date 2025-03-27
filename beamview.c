@@ -197,23 +197,19 @@ static GLuint create_gl_texture_from_cairo_region(
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    int row_length = cairo_stride / 4;
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
     expect(offset >= 0 && region_size > 0);
 
     if (orientation == SPLIT_HORIZONTAL) {
         expect(offset + region_size <= cairo_width);
-        int row_length = cairo_stride / 4;
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
                      GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     } else { // SPLIT_VERTICAL
         expect(offset + region_size <= cairo_height);
-        int row_length = cairo_stride / 4;
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, full_width, region_size, 0,
                      GL_BGRA, GL_UNSIGNED_BYTE,
                      cairo_data + offset * cairo_stride);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     }
     return texture;
 }
