@@ -38,16 +38,10 @@ static inline void drop_g_object_unref(void *objp) {
 }
 
 #define NUM_CONTEXTS 2
-
-enum split_orientation {
-    SPLIT_HORIZONTAL, // left/right split
-    SPLIT_VERTICAL    // top/bottom split
-};
-
+enum split_orientation { SPLIT_HORIZONTAL, SPLIT_VERTICAL };
 struct texture_data {
     GLuint texture;
-    int natural_width;
-    int natural_height;
+    int natural_width, natural_height;
 };
 
 struct gl_ctx {
@@ -58,21 +52,15 @@ struct gl_ctx {
 struct render_cache_entry {
     int page_index;
     GLuint textures[NUM_CONTEXTS];
-    int widths[NUM_CONTEXTS];
-    int texture_height;
+    int widths[NUM_CONTEXTS], texture_height;
 };
 
 struct prog_state {
     struct gl_ctx *ctx;
     int num_ctx;
-    double pdf_width;
-    double pdf_height;
-    double current_scale;
+    double pdf_width, pdf_height, current_scale;
     PopplerDocument *document;
-    int cache_complete;
-    int current_page;
-    int pending_quit;
-    int num_pages;
+    int cache_complete, current_page, pending_quit, num_pages;
     struct render_cache_entry **cache_entries;
     enum split_orientation orientation;
 };
