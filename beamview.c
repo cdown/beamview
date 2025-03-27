@@ -309,8 +309,6 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
 }
 
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
-    memset(state, 0, sizeof(*state));
-
     char resolved_path[PATH_MAX];
     if (!realpath(pdf_file, resolved_path)) {
         perror("realpath");
@@ -550,12 +548,10 @@ int main(int argc, char *argv[]) {
     }
 
     expect(glfwInit());
-    struct prog_state ps;
+    struct prog_state ps = {0};
     expect(init_prog_state(&ps, pdf_file) == 0);
     ps.orientation = orientation;
     ps.num_ctx = NUM_CONTEXTS;
-    ps.current_page = 0;
-    ps.pending_quit = 0;
     ps.num_pages = poppler_document_get_n_pages(ps.document);
     ps.cache_entries =
         calloc(ps.num_pages, sizeof(struct render_cache_entry *));
