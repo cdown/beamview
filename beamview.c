@@ -368,8 +368,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action,
     (void)scancode;
     (void)mods;
     if (action == GLFW_PRESS) {
-        struct prog_state *state =
-            (struct prog_state *)glfwGetWindowUserPointer(window);
+        struct prog_state *state = glfwGetWindowUserPointer(window);
         if (key == GLFW_KEY_Q) {
             if (state->pending_quit) {
                 for (int i = 0; i < state->num_ctx; i++) {
@@ -412,8 +411,7 @@ static void framebuffer_size_callback(GLFWwindow *window, int width,
                                       int height) {
     (void)width;
     (void)height;
-    struct prog_state *state =
-        (struct prog_state *)glfwGetWindowUserPointer(window);
+    struct prog_state *state = glfwGetWindowUserPointer(window);
     double new_scale =
         compute_scale(state->ctx, state->num_ctx, state->pdf_width,
                       state->pdf_height, state->orientation);
