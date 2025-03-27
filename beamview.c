@@ -273,23 +273,16 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
 
 static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
-    int sizes[num_ctx];
     int base = (int)pdf_width / num_ctx;
+    GLFWwindow *share = NULL;
     for (int i = 0; i < num_ctx; i++) {
-        sizes[i] = base;
-    }
-    sizes[num_ctx - 1] = (int)pdf_width - base * (num_ctx - 1);
-
-    char title[32];
-    snprintf(title, sizeof(title), "Context %d", 0);
-    ctx[0].window =
-        glfwCreateWindow(sizes[0], (int)pdf_height, title, NULL, NULL);
-    expect(ctx[0].window);
-    for (int i = 1; i < num_ctx; i++) {
+        int width = (i == num_ctx - 1) ? (int)pdf_width - base * i : base;
+        char title[32];
         snprintf(title, sizeof(title), "Context %d", i);
-        ctx[i].window = glfwCreateWindow(sizes[i], (int)pdf_height, title, NULL,
-                                         ctx[0].window);
+        ctx[i].window =
+            glfwCreateWindow(width, (int)pdf_height, title, NULL, share);
         expect(ctx[i].window);
+        share = ctx[i].window;
     }
 }
 
