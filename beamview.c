@@ -39,6 +39,11 @@ DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
 
 #define NUM_CONTEXTS 2
 
+enum split_orientation {
+    SPLIT_HORIZONTAL, // left/right split
+    SPLIT_VERTICAL    // top/bottom split
+};
+
 /**
  * Holds texture information and its natural dimensions.
  *
@@ -101,6 +106,7 @@ struct prog_state {
     int pending_quit;
     int num_pages;
     struct render_cache_entry **cache_entries;
+    enum split_orientation orientation;
 };
 
 /**
@@ -141,19 +147,16 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    GLfloat vertices[] = {
-        (GLfloat)dst_x, (GLfloat)dst_y,
-        (GLfloat)(dst_x + new_width), (GLfloat)dst_y,
-        (GLfloat)(dst_x + new_width), (GLfloat)(dst_y + new_height),
-        (GLfloat)dst_x, (GLfloat)(dst_y + new_height)
-    };
+    GLfloat vertices[] = {(GLfloat)dst_x,
+                          (GLfloat)dst_y,
+                          (GLfloat)(dst_x + new_width),
+                          (GLfloat)dst_y,
+                          (GLfloat)(dst_x + new_width),
+                          (GLfloat)(dst_y + new_height),
+                          (GLfloat)dst_x,
+                          (GLfloat)(dst_y + new_height)};
 
-    GLfloat tex_coords[] = {
-        0.0f, 0.0f,
-        1.0f, 0.0f,
-        1.0f, 1.0f,
-        0.0f, 1.0f
-    };
+    GLfloat tex_coords[] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -177,7 +180,8 @@ static void present_texture(GLFWwindow *window, GLuint texture,
  * @pdf_height: The intrinsic PDF height.
  */
 static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
-                            double pdf_height) {
+                            double pdf_height,
+                            enum split_orientation orientation) {
     if (pdf_width <= 0 || pdf_height <= 0) {
         fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
                 pdf_width, pdf_height);
@@ -187,8 +191,14 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
         glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
-        double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
-                              (double)win_height / pdf_height);
+        double scale_i;
+        if (orientation == SPLIT_HORIZONTAL) {
+            scale_i = fmax((double)win_width / (pdf_width / num_ctx),
+                           (double)win_height / pdf_height);
+        } else { // SPLIT_VERTICAL
+            scale_i = fmax((double)win_width / pdf_width,
+                           (double)win_height / (pdf_height / num_ctx));
+        }
         if (scale_i > scale)
             scale = scale_i;
     }
@@ -237,19 +247,11 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
  * @region_width: The width of the region to extract.
  * @img_height: The height of the image.
  */
-static GLuint create_gl_texture_from_cairo(cairo_surface_t *cairo_surface,
-                                           int x_offset, int region_width,
-                                           int img_height) {
+static GLuint create_gl_texture_from_cairo_region(
+    cairo_surface_t *cairo_surface, enum split_orientation orientation,
+    int offset, int region_size, int full_width, int full_height) {
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
-    if (x_offset < 0 || region_width <= 0 ||
-        x_offset + region_width > cairo_width) {
-        fprintf(
-            stderr,
-            "Requested region exceeds cairo surface bounds: x_offset %d, region_width %d, cairo_width %d\n",
-            x_offset, region_width, cairo_width);
-        return 0;
-    }
-
+    int cairo_height = cairo_image_surface_get_height(cairo_surface);
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
 
@@ -258,11 +260,37 @@ static GLuint create_gl_texture_from_cairo(cairo_surface_t *cairo_surface,
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    int row_length = cairo_stride / 4;
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_width, img_height, 0,
-                 GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + x_offset * 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+    if (orientation == SPLIT_HORIZONTAL) {
+        if (offset < 0 || region_size <= 0 ||
+            offset + region_size > cairo_width) {
+            fprintf(
+                stderr,
+                "Requested region exceeds cairo surface bounds: offset %d, region_size %d, cairo_width %d\n",
+                offset, region_size, cairo_width);
+            return 0;
+        }
+        int row_length = cairo_stride / 4;
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
+                     GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    } else { // SPLIT_VERTICAL
+        if (offset < 0 || region_size <= 0 ||
+            offset + region_size > cairo_height) {
+            fprintf(
+                stderr,
+                "Requested region exceeds cairo surface bounds: offset %d, region_size %d, cairo_height %d\n",
+                offset, region_size, cairo_height);
+            return 0;
+        }
+        int row_length = cairo_stride / 4;
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, row_length);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, full_width, region_size, 0,
+                     GL_BGRA, GL_UNSIGNED_BYTE,
+                     cairo_data + offset * cairo_stride);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    }
     return texture;
 }
 
@@ -311,27 +339,57 @@ static struct render_cache_entry *create_cache_entry(int page_index,
         return NULL;
     }
     entry->page_index = page_index;
-    entry->texture_height = img_height;
-    int base_width = img_width / state->num_ctx;
-    for (int i = 0; i < state->num_ctx; i++) {
-        int x_offset = i * base_width;
-        int region_width = (i == state->num_ctx - 1)
-                               ? (img_width - base_width * i)
-                               : base_width;
-        entry->widths[i] = region_width;
-        entry->textures[i] = create_gl_texture_from_cairo(
-            cairo_surface, x_offset, region_width, img_height);
-        if (!entry->textures[i]) {
-            fprintf(stderr,
+
+    if (state->orientation == SPLIT_HORIZONTAL) {
+        entry->texture_height = img_height;
+        int base_width = img_width / state->num_ctx;
+        for (int i = 0; i < state->num_ctx; i++) {
+            int x_offset = i * base_width;
+            int region_width = (i == state->num_ctx - 1)
+                                   ? (img_width - base_width * i)
+                                   : base_width;
+            entry->widths[i] = region_width;
+            entry->textures[i] = create_gl_texture_from_cairo_region(
+                cairo_surface, state->orientation, x_offset, region_width,
+                img_width, img_height);
+            if (!entry->textures[i]) {
+                fprintf(
+                    stderr,
                     "Failed to create OpenGL texture for page %d, context %d\n",
                     page_index, i);
-            for (int j = 0; j < i; j++) {
-                if (entry->textures[j])
-                    glDeleteTextures(1, &entry->textures[j]);
+                for (int j = 0; j < i; j++) {
+                    if (entry->textures[j])
+                        glDeleteTextures(1, &entry->textures[j]);
+                }
+                free(entry);
+                return NULL;
             }
-            free(entry);
-            return NULL;
         }
+    } else { // SPLIT_VERTICAL
+        int base_height = img_height / state->num_ctx;
+        for (int i = 0; i < state->num_ctx; i++) {
+            int y_offset = i * base_height;
+            int region_height = (i == state->num_ctx - 1)
+                                    ? (img_height - base_height * i)
+                                    : base_height;
+            entry->widths[i] = region_height;
+            entry->textures[i] = create_gl_texture_from_cairo_region(
+                cairo_surface, state->orientation, y_offset, region_height,
+                img_width, img_height);
+            if (!entry->textures[i]) {
+                fprintf(
+                    stderr,
+                    "Failed to create OpenGL texture for page %d, context %d\n",
+                    page_index, i);
+                for (int j = 0; j < i; j++) {
+                    if (entry->textures[j])
+                        glDeleteTextures(1, &entry->textures[j]);
+                }
+                free(entry);
+                return NULL;
+            }
+        }
+        entry->texture_height = img_width;
     }
     fprintf(stderr, "Cache page %d created.\n", page_index);
     return entry;
@@ -456,20 +514,32 @@ static GLFWwindow *create_window(const char *title, int width, int height,
  * @pdf_height: The intrinsic PDF height.
  */
 static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
-                           double pdf_height) {
-    int init_img_width = (int)pdf_width;
-    int init_img_height = (int)pdf_height;
-    int widths[num_ctx];
-    for (int i = 0; i < num_ctx; i++) {
-        widths[i] = init_img_width / num_ctx;
+                           double pdf_height,
+                           enum split_orientation orientation) {
+    int total, init_other;
+    if (orientation == SPLIT_HORIZONTAL) {
+        total = (int)pdf_width;
+        init_other = (int)pdf_height;
+    } else {
+        total = (int)pdf_height;
+        init_other = (int)pdf_width;
     }
-    widths[num_ctx - 1] =
-        init_img_width - (init_img_width / num_ctx) * (num_ctx - 1);
+    int sizes[num_ctx];
+    int base = total / num_ctx;
+    for (int i = 0; i < num_ctx; i++) {
+        sizes[i] = base;
+    }
+    sizes[num_ctx - 1] = total - base * (num_ctx - 1);
 
     /* Create the first window normally */
     char title[32];
-    snprintf(title, sizeof(title), "Context %d", 0);
-    ctx[0].window = create_window(title, widths[0], init_img_height, NULL);
+    if (orientation == SPLIT_HORIZONTAL) {
+        snprintf(title, sizeof(title), "Context %d", 0);
+        ctx[0].window = create_window(title, sizes[0], init_other, NULL);
+    } else {
+        snprintf(title, sizeof(title), "Context %d", 0);
+        ctx[0].window = create_window(title, init_other, sizes[0], NULL);
+    }
     if (!ctx[0].window) {
         fprintf(stderr, "Failed to create GLFW window for context 0\n");
         return -EIO;
@@ -477,8 +547,12 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     /* Create remaining windows sharing the first window's context */
     for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
-        ctx[i].window =
-            create_window(title, widths[i], init_img_height, ctx[0].window);
+        if (orientation == SPLIT_HORIZONTAL)
+            ctx[i].window =
+                create_window(title, sizes[i], init_other, ctx[0].window);
+        else
+            ctx[i].window =
+                create_window(title, init_other, sizes[i], ctx[0].window);
         if (!ctx[i].window) {
             fprintf(stderr, "Failed to create GLFW window for context %d\n", i);
             for (int j = 0; j < i; j++) {
@@ -492,17 +566,8 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
 }
 
 /**
- * Create renderers for the provided contexts.
- *
- * Note: With GLFW the window’s OpenGL context is used, so no separate renderer
- * is needed.
+ * GLFW key callback.
  */
-static int create_context_renderers(struct gl_ctx ctx[], int num_ctx) {
-    (void)ctx;
-    (void)num_ctx;
-    return 0;
-}
-
 static void key_callback(GLFWwindow *window, int key, int scancode, int action,
                          int mods) {
     (void)scancode;
@@ -539,18 +604,17 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action,
                     state->cache_entries[new_page] =
                         create_cache_entry(new_page, state);
                 }
-                if (state->cache_entries[new_page]) {
+                if (state->cache_entries[new_page])
                     state->current_page = new_page;
-                } else {
+                else
                     fprintf(stderr, "Error rendering page %d\n", new_page);
-                }
             }
         }
     }
 }
 
 /**
- * Framebuffer size callback to handle window resize events.
+ * GLFW framebuffer size callback.
  */
 static void framebuffer_size_callback(GLFWwindow *window, int width,
                                       int height) {
@@ -558,8 +622,9 @@ static void framebuffer_size_callback(GLFWwindow *window, int width,
     (void)height;
     struct prog_state *state =
         (struct prog_state *)glfwGetWindowUserPointer(window);
-    double new_scale = compute_scale(state->ctx, state->num_ctx,
-                                     state->pdf_width, state->pdf_height);
+    double new_scale =
+        compute_scale(state->ctx, state->num_ctx, state->pdf_width,
+                      state->pdf_height, state->orientation);
     if (fabs(new_scale - state->current_scale) > 0.01) {
         state->current_scale = new_scale;
         fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
@@ -587,37 +652,53 @@ static int handle_glfw_events(struct prog_state *state) {
 
     glfwMakeContextCurrent(state->ctx[0].window);
 
-    // The first page is rendered blocking, the rest are cached
+    /* Render the first page (blocking render); others will be cached. */
     state->cache_entries[state->current_page] =
         create_cache_entry(state->current_page, state);
     if (state->cache_entries[state->current_page]) {
         for (int i = 0; i < state->num_ctx; i++) {
             glfwMakeContextCurrent(state->ctx[i].window);
-            present_texture(
-                state->ctx[i].window,
-                state->cache_entries[state->current_page]->textures[i],
-                state->cache_entries[state->current_page]->widths[i],
-                state->cache_entries[state->current_page]->texture_height);
-        }
-    }
-
-    while (!glfwWindowShouldClose(state->ctx[0].window)) {
-        if (state->cache_complete) {
-            glfwWaitEvents();
-        } else {
-            // Allow a keypress to interrupt caching
-            glfwWaitEventsTimeout(0.01);
-            cache_one_slide(state->cache_entries, state->num_pages, state);
-        }
-
-        if (state->cache_entries[state->current_page]) {
-            for (int i = 0; i < state->num_ctx; i++) {
-                glfwMakeContextCurrent(state->ctx[i].window);
+            if (state->orientation == SPLIT_HORIZONTAL) {
                 present_texture(
                     state->ctx[i].window,
                     state->cache_entries[state->current_page]->textures[i],
                     state->cache_entries[state->current_page]->widths[i],
                     state->cache_entries[state->current_page]->texture_height);
+            } else {
+                present_texture(
+                    state->ctx[i].window,
+                    state->cache_entries[state->current_page]->textures[i],
+                    state->cache_entries[state->current_page]->texture_height,
+                    state->cache_entries[state->current_page]->widths[i]);
+            }
+        }
+    }
+
+    while (!glfwWindowShouldClose(state->ctx[0].window)) {
+        if (state->cache_complete)
+            glfwWaitEvents();
+        else {
+            glfwWaitEventsTimeout(0.01);
+            cache_one_slide(state->cache_entries, state->num_pages, state);
+        }
+        if (state->cache_entries[state->current_page]) {
+            for (int i = 0; i < state->num_ctx; i++) {
+                glfwMakeContextCurrent(state->ctx[i].window);
+                if (state->orientation == SPLIT_HORIZONTAL) {
+                    present_texture(
+                        state->ctx[i].window,
+                        state->cache_entries[state->current_page]->textures[i],
+                        state->cache_entries[state->current_page]->widths[i],
+                        state->cache_entries[state->current_page]
+                            ->texture_height);
+                } else {
+                    present_texture(
+                        state->ctx[i].window,
+                        state->cache_entries[state->current_page]->textures[i],
+                        state->cache_entries[state->current_page]
+                            ->texture_height,
+                        state->cache_entries[state->current_page]->widths[i]);
+                }
             }
         }
     }
@@ -628,10 +709,26 @@ static int handle_glfw_events(struct prog_state *state) {
 
 int main(int argc, char *argv[]) {
     int ret = 0;
+    const char *pdf_file = NULL;
+    enum split_orientation orientation = SPLIT_HORIZONTAL; // default:
+                                                           // left/right split
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <pdf_file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-h|-v] <pdf_file>\n", argv[0]);
         return EXIT_FAILURE;
+    }
+    if (argc == 3) {
+        if (strcmp(argv[1], "-h") == 0)
+            orientation = SPLIT_HORIZONTAL; // left/right split
+        else if (strcmp(argv[1], "-v") == 0)
+            orientation = SPLIT_VERTICAL; // top/bottom split
+        else {
+            fprintf(stderr, "Unknown option %s\n", argv[1]);
+            return EXIT_FAILURE;
+        }
+        pdf_file = argv[2];
+    } else {
+        pdf_file = argv[1];
     }
 
     if (!glfwInit()) {
@@ -640,12 +737,13 @@ int main(int argc, char *argv[]) {
     }
 
     struct prog_state ps;
-    ret = init_prog_state(&ps, argv[1]);
+    ret = init_prog_state(&ps, pdf_file);
     if (ret < 0) {
         glfwTerminate();
         return EXIT_FAILURE;
     }
 
+    ps.orientation = orientation;
     ps.num_ctx = NUM_CONTEXTS;
     ps.current_page = 0;
     ps.pending_quit = 0;
@@ -674,26 +772,16 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    ret = create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
+    ret = create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height,
+                          ps.orientation);
     if (ret < 0) {
         free(ps.ctx);
         glfwTerminate();
         return EXIT_FAILURE;
     }
 
-    ret = create_context_renderers(ps.ctx, ps.num_ctx);
-    if (ret < 0) {
-        for (int i = 0; i < ps.num_ctx; i++) {
-            if (ps.ctx[i].window)
-                glfwDestroyWindow(ps.ctx[i].window);
-        }
-        free(ps.ctx);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
-    ps.current_scale =
-        compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
+    ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width,
+                                     ps.pdf_height, ps.orientation);
 
     ret = handle_glfw_events(&ps);
     if (ret < 0) {
