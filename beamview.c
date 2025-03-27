@@ -299,7 +299,6 @@ static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
     if (action == GLFW_PRESS) {
         struct prog_state *state = glfwGetWindowUserPointer(window);
         if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
-            // Uppercase Q (with Shift) quits immediately.
             for (int i = 0; i < state->num_ctx; i++) {
                 glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
             }
