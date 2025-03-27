@@ -85,7 +85,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glOrtho(0, win_width, win_height, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
@@ -104,10 +103,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glVertexPointer(2, GL_FLOAT, 0, vertices);
     glTexCoordPointer(2, GL_FLOAT, 0, tex_coords);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-
-    glDisable(GL_TEXTURE_2D);
     glfwSwapBuffers(window);
 }
 
