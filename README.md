@@ -13,11 +13,16 @@ A dual-screen PDF viewer for presenting Beamer presentations with notes.
 
 ## Usage
 
-beamview has a simple interface focused on presenting:
+First, compile your beamer document to put notes at the side:
+
+    \setbeameroption{show notes on second screen}
+
+Then call beamview on the resulting PDF:
 
     beamview presentation.pdf
 
-This will open two windows, each displaying half of the PDF. Navigate using:
+This will open two windows, one displaying the notes, and one displaying the
+presentation. Navigate using:
 
 | Key                             | Action          |
 |---------------------------------|-----------------|
@@ -25,7 +30,8 @@ This will open two windows, each displaying half of the PDF. Navigate using:
 | Right Arrow, Down Arrow, Page Down | Next slide  |
 | Shift+Q                         | Quit           |
 
-The windows will automatically scale content to fit, and you can resize them as needed.
+The windows will automatically scale content to fit, and you can resize them as
+needed.
 
 ## Compilation
 
