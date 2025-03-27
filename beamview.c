@@ -10,6 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define expect(x)                                                              \
+    do {                                                                       \
+        if (!(x)) {                                                            \
+            fprintf(stderr, "!(%s) at %s:%s:%d\n", #x, __FILE__, __func__,     \
+                    __LINE__);                                                 \
+            abort();                                                           \
+        }                                                                      \
+    } while (0)
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
 #define DEFINE_DROP_FUNC(type, func)                                           \
@@ -255,9 +263,7 @@ static struct render_cache_entry *create_cache_entry(int page_index,
 
     struct render_cache_entry *entry =
         malloc(sizeof(struct render_cache_entry));
-    if (!entry) {
-        return NULL;
-    }
+    expect(entry);
     entry->page_index = page_index;
 
     if (state->orientation == SPLIT_HORIZONTAL) {
@@ -573,7 +579,6 @@ static int handle_glfw_events(struct prog_state *state) {
 }
 
 int main(int argc, char *argv[]) {
-    int ret = 0;
     const char *pdf_file = NULL;
     enum split_orientation orientation = SPLIT_HORIZONTAL;
 
@@ -595,18 +600,9 @@ int main(int argc, char *argv[]) {
         pdf_file = argv[1];
     }
 
-    if (!glfwInit()) {
-        fprintf(stderr, "GLFW could not initialise\n");
-        return EXIT_FAILURE;
-    }
-
+    expect(glfwInit());
     struct prog_state ps;
-    ret = init_prog_state(&ps, pdf_file);
-    if (ret < 0) {
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
+    expect(init_prog_state(&ps, pdf_file) == 0);
     ps.orientation = orientation;
     ps.num_ctx = NUM_CONTEXTS;
     ps.current_page = 0;
@@ -614,44 +610,16 @@ int main(int argc, char *argv[]) {
     ps.num_pages = poppler_document_get_n_pages(ps.document);
     ps.cache_entries =
         calloc(ps.num_pages, sizeof(struct render_cache_entry *));
-    if (!ps.cache_entries) {
-        fprintf(stderr, "Failed to allocate cache entries array.\n");
-        if (ps.document) {
-            g_object_unref(ps.document);
-            ps.document = NULL;
-        }
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
+    expect(ps.cache_entries);
     ps.ctx = calloc(ps.num_ctx, sizeof(struct gl_ctx));
-    if (!ps.ctx) {
-        fprintf(stderr, "Failed to allocate contexts.\n");
-        if (ps.document) {
-            g_object_unref(ps.document);
-            ps.document = NULL;
-        }
-        free(ps.cache_entries);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
-    ret = create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height,
-                          ps.orientation);
-    if (ret < 0) {
-        free(ps.ctx);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
+    expect(ps.ctx);
+    expect(create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height,
+                           ps.orientation) == 0);
 
     ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width,
                                      ps.pdf_height, ps.orientation);
 
-    ret = handle_glfw_events(&ps);
-    if (ret < 0) {
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
+    expect(handle_glfw_events(&ps) == 0);
 
     if (ps.document) {
         g_object_unref(ps.document);
