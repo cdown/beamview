@@ -44,33 +44,17 @@ enum split_orientation {
     SPLIT_VERTICAL    // top/bottom split
 };
 
-/**
- * Holds texture information and its natural dimensions.
- *
- * @texture: The OpenGL texture.
- * @natural_width: The original width of the texture.
- * @natural_height: The original height of the texture.
- */
 struct texture_data {
     GLuint texture;
     int natural_width;
     int natural_height;
 };
 
-/* Represents a context, including a GLFW window and texture data. */
 struct gl_ctx {
     GLFWwindow *window;
     struct texture_data texture;
 };
 
-/**
- * Represents a cached rendered page.
- *
- * @page_index: The page index corresponding to this entry.
- * @textures: Array of textures for each context.
- * @widths: Array of natural widths for each texture.
- * @texture_height: Natural height of the combined page.
- */
 struct render_cache_entry {
     int page_index;
     GLuint textures[NUM_CONTEXTS];
@@ -78,22 +62,6 @@ struct render_cache_entry {
     int texture_height;
 };
 
-/**
- * Holds the program state including contexts, PDF dimensions, scale, and
- * document.
- *
- * @ctx: Array of contexts.
- * @num_ctx: Number of contexts.
- * @pdf_width: The intrinsic PDF width.
- * @pdf_height: The intrinsic PDF height.
- * @current_scale: The scale factor applied for rendering.
- * @document: The PopplerDocument representing the PDF.
- * @cache_complete: Flag to bypass recaching if all slides are cached.
- * @current_page: The currently displayed page.
- * @pending_quit: Flag to allow fast exit on repeated Q key presses.
- * @num_pages: Total number of pages in the document.
- * @cache_entries: Array of cached rendered pages.
- */
 struct prog_state {
     struct gl_ctx *ctx;
     int num_ctx;
@@ -109,14 +77,6 @@ struct prog_state {
     enum split_orientation orientation;
 };
 
-/**
- * Present a texture on a window while maintaining its aspect ratio.
- *
- * @window: The GLFW window with an OpenGL context.
- * @texture: The OpenGL texture to present.
- * @natural_width: The original width of the texture.
- * @natural_height: The original height of the texture.
- */
 static void present_texture(GLFWwindow *window, GLuint texture,
                             int natural_width, int natural_height) {
     if (!texture)
@@ -170,15 +130,6 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glfwSwapBuffers(window);
 }
 
-/**
- * Compute the required scale factor based on the intrinsic PDF dimensions and
- * the sizes of windows in multiple contexts.
- *
- * @ctx: Array of contexts.
- * @num_ctx: Number of contexts.
- * @pdf_width: The intrinsic PDF width.
- * @pdf_height: The intrinsic PDF height.
- */
 static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height,
                             enum split_orientation orientation) {
@@ -205,14 +156,6 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     return scale;
 }
 
-/**
- * Render a PDF page to a Cairo image surface.
- *
- * @page: The PopplerPage to render.
- * @scale: The scale factor to apply.
- * @img_width: Output pointer for the resulting image width.
- * @img_height: Output pointer for the resulting image height.
- */
 static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
                                                      double scale,
                                                      int *img_width,
@@ -239,14 +182,6 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
     return surface;
 }
 
-/**
- * Create an OpenGL texture from a region of a Cairo image surface.
- *
- * @cairo_surface: The source Cairo surface.
- * @x_offset: The starting x offset in pixels.
- * @region_width: The width of the region to extract.
- * @img_height: The height of the image.
- */
 static GLuint create_gl_texture_from_cairo_region(
     cairo_surface_t *cairo_surface, enum split_orientation orientation,
     int offset, int region_size, int full_width, int full_height) {
@@ -294,11 +229,6 @@ static GLuint create_gl_texture_from_cairo_region(
     return texture;
 }
 
-/**
- * Free a render cache entry and its associated textures.
- *
- * @entry: The render cache entry to free.
- */
 static void free_cache_entry(struct render_cache_entry *entry) {
     if (!entry)
         return;
@@ -309,16 +239,6 @@ static void free_cache_entry(struct render_cache_entry *entry) {
     free(entry);
 }
 
-/**
- * Render and create a cache entry for a given page index.
- *
- * Added debug output to indicate when a page is rendered live.
- *
- * @page_index: The index of the page to render.
- * @state: Pointer to the program state.
- *
- * @return A new render_cache_entry for the requested page, or NULL on failure.
- */
 static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
     _drop_(g_object_unref) PopplerPage *page =
@@ -395,12 +315,6 @@ static struct render_cache_entry *create_cache_entry(int page_index,
     return entry;
 }
 
-/**
- * Free all cache entries in the provided cache array.
- *
- * @cache_entries: Array of cache entries.
- * @num_pages: Total number of pages.
- */
 static void free_all_cache_entries(struct render_cache_entry **cache_entries,
                                    int num_pages) {
     for (int i = 0; i < num_pages; i++) {
@@ -411,18 +325,6 @@ static void free_all_cache_entries(struct render_cache_entry **cache_entries,
     }
 }
 
-/**
- * When idle (i.e., no events for 50ms), update the cache by creating any
- * missing cache entries.
- *
- * Renders one missing page per idle cycle.
- *
- * Added fast exit mode if all slides are already cached.
- *
- * @cache_entries: Array of cache entries.
- * @num_pages: The total number of pages in the document.
- * @state: Pointer to the program state.
- */
 static void cache_one_slide(struct render_cache_entry **cache_entries,
                             int num_pages, struct prog_state *state) {
     if (state->cache_complete)
@@ -443,13 +345,6 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
     state->cache_complete = complete;
 }
 
-/**
- * Initialise the program state by loading the PDF, resolving its intrinsic
- * dimensions, and setting default values.
- *
- * @state: Pointer to the program state.
- * @pdf_file: Path to the PDF file.
- */
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     memset(state, 0, sizeof(*state));
 
@@ -492,27 +387,11 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     return 0;
 }
 
-/**
- * Create a window with the given title and dimensions.
- *
- * @title: The window title.
- * @width: The window width.
- * @height: The window height.
- * @share: An existing window to share the OpenGL context with (can be NULL).
- */
 static GLFWwindow *create_window(const char *title, int width, int height,
                                  GLFWwindow *share) {
     return glfwCreateWindow(width, height, title, NULL, share);
 }
 
-/**
- * Create contexts (windows) based on the intrinsic PDF dimensions.
- *
- * @ctx: Array of contexts to populate.
- * @num_ctx: Number of contexts.
- * @pdf_width: The intrinsic PDF width.
- * @pdf_height: The intrinsic PDF height.
- */
 static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                            double pdf_height,
                            enum split_orientation orientation) {
@@ -531,7 +410,6 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     }
     sizes[num_ctx - 1] = total - base * (num_ctx - 1);
 
-    /* Create the first window normally */
     char title[32];
     if (orientation == SPLIT_HORIZONTAL) {
         snprintf(title, sizeof(title), "Context %d", 0);
@@ -544,7 +422,6 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
         fprintf(stderr, "Failed to create GLFW window for context 0\n");
         return -EIO;
     }
-    /* Create remaining windows sharing the first window's context */
     for (int i = 1; i < num_ctx; i++) {
         snprintf(title, sizeof(title), "Context %d", i);
         if (orientation == SPLIT_HORIZONTAL)
@@ -565,9 +442,6 @@ static int create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     return 0;
 }
 
-/**
- * GLFW key callback.
- */
 static void key_callback(GLFWwindow *window, int key, int scancode, int action,
                          int mods) {
     (void)scancode;
@@ -613,9 +487,6 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action,
     }
 }
 
-/**
- * GLFW framebuffer size callback.
- */
 static void framebuffer_size_callback(GLFWwindow *window, int width,
                                       int height) {
     (void)width;
@@ -636,12 +507,6 @@ static void framebuffer_size_callback(GLFWwindow *window, int width,
     }
 }
 
-/**
- * Handle GLFW events in a loop, including key and window events, and render
- * page changes.
- *
- * @state: Pointer to the program state.
- */
 static int handle_glfw_events(struct prog_state *state) {
     for (int i = 0; i < state->num_ctx; i++) {
         glfwSetKeyCallback(state->ctx[i].window, key_callback);
@@ -710,8 +575,7 @@ static int handle_glfw_events(struct prog_state *state) {
 int main(int argc, char *argv[]) {
     int ret = 0;
     const char *pdf_file = NULL;
-    enum split_orientation orientation = SPLIT_HORIZONTAL; // default:
-                                                           // left/right split
+    enum split_orientation orientation = SPLIT_HORIZONTAL;
 
     if (argc < 2) {
         fprintf(stderr, "Usage: %s [-h|-v] <pdf_file>\n", argv[0]);
@@ -719,9 +583,9 @@ int main(int argc, char *argv[]) {
     }
     if (argc == 3) {
         if (strcmp(argv[1], "-h") == 0)
-            orientation = SPLIT_HORIZONTAL; // left/right split
+            orientation = SPLIT_HORIZONTAL;
         else if (strcmp(argv[1], "-v") == 0)
-            orientation = SPLIT_VERTICAL; // top/bottom split
+            orientation = SPLIT_VERTICAL;
         else {
             fprintf(stderr, "Unknown option %s\n", argv[1]);
             return EXIT_FAILURE;
