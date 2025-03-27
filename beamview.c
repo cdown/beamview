@@ -20,30 +20,22 @@
     } while (0)
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
-#define DEFINE_DROP_FUNC(type, func)                                           \
-    static inline void drop_##func(type *p) {                                  \
-        if (*p)                                                                \
-            func(*p);                                                          \
-    }
+static inline void drop_free(void *pptr) {
+    void **ptr = pptr;
+    if (*ptr)
+        free(*ptr);
+}
 
-#define DEFINE_DROP_FUNC_COERCE(type, func)                                    \
-    static inline void drop_##func(void *p) {                                  \
-        type *pp = (type *)p;                                                  \
-        if (*pp) {                                                             \
-            func((type) * pp);                                                 \
-        }                                                                      \
-    }
+static inline void drop_cairo_surface_destroy(cairo_surface_t **surface) {
+    if (*surface)
+        cairo_surface_destroy(*surface);
+}
 
-#define DEFINE_DROP_FUNC_VOID(func)                                            \
-    static inline void drop_##func(void *p) {                                  \
-        void **pp = p;                                                         \
-        if (*pp)                                                               \
-            func(*pp);                                                         \
-    }
-
-DEFINE_DROP_FUNC_VOID(free)
-DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
-DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
+static inline void drop_g_object_unref(void *objp) {
+    GObject **obj = (GObject **)objp;
+    if (*obj)
+        g_object_unref(*obj);
+}
 
 #define NUM_CONTEXTS 2
 
