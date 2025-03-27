@@ -295,38 +295,37 @@ static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
 
 static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
                          int action, int mods) {
-    if (action == GLFW_PRESS) {
-        struct prog_state *state = glfwGetWindowUserPointer(window);
-        if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
-            for (int i = 0; i < state->num_ctx; i++) {
-                glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
-            }
-        } else {
-            int new_page = state->current_page;
-            if (key == GLFW_KEY_LEFT || key == GLFW_KEY_UP ||
-                key == GLFW_KEY_PAGE_UP) {
-                if (state->current_page > 0)
-                    new_page = state->current_page - 1;
-            } else if (key == GLFW_KEY_RIGHT || key == GLFW_KEY_DOWN ||
-                       key == GLFW_KEY_PAGE_DOWN) {
-                if (state->current_page < state->num_pages - 1)
-                    new_page = state->current_page + 1;
-            }
-            if (new_page != state->current_page) {
-                if (state->cache_entries[new_page] == NULL) {
-                    fprintf(
-                        stderr,
-                        "Warning: Page %d not cached; performing blocking render.\n",
-                        new_page);
-                    state->cache_entries[new_page] =
-                        create_cache_entry(new_page, state);
-                }
-                if (state->cache_entries[new_page])
-                    state->current_page = new_page;
-                else
-                    fprintf(stderr, "Error rendering page %d\n", new_page);
-            }
+    if (action != GLFW_PRESS)
+        return;
+
+    struct prog_state *state = glfwGetWindowUserPointer(window);
+    if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
+        for (int i = 0; i < state->num_ctx; i++)
+            glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
+        return;
+    }
+
+    int new_page = state->current_page;
+    if ((key == GLFW_KEY_LEFT || key == GLFW_KEY_UP ||
+         key == GLFW_KEY_PAGE_UP) &&
+        state->current_page > 0)
+        new_page = state->current_page - 1;
+    else if ((key == GLFW_KEY_RIGHT || key == GLFW_KEY_DOWN ||
+              key == GLFW_KEY_PAGE_DOWN) &&
+             state->current_page < state->num_pages - 1) {
+        new_page = state->current_page + 1;
+    }
+
+    if (new_page != state->current_page) {
+        if (!state->cache_entries[new_page]) {
+            fprintf(
+                stderr,
+                "Warning: Page %d not cached; performing blocking render.\n",
+                new_page);
+            state->cache_entries[new_page] =
+                create_cache_entry(new_page, state);
         }
+        state->current_page = new_page;
     }
 }
 
