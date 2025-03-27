@@ -245,35 +245,24 @@ static struct render_cache_entry *create_cache_entry(int page_index,
     expect(entry);
     entry->page_index = page_index;
 
-    if (state->orientation == SPLIT_HORIZONTAL) {
-        entry->texture_height = img_height;
-        int base_width = img_width / state->num_ctx;
-        for (int i = 0; i < state->num_ctx; i++) {
-            int x_offset = i * base_width;
-            int region_width = (i == state->num_ctx - 1)
-                                   ? (img_width - base_width * i)
-                                   : base_width;
-            entry->widths[i] = region_width;
-            entry->textures[i] = create_gl_texture_from_cairo_region(
-                cairo_surface, state->orientation, x_offset, region_width,
-                img_width, img_height);
-            expect(entry->textures[i]);
-        }
-    } else { // SPLIT_VERTICAL
-        int base_height = img_height / state->num_ctx;
-        for (int i = 0; i < state->num_ctx; i++) {
-            int y_offset = i * base_height;
-            int region_height = (i == state->num_ctx - 1)
-                                    ? (img_height - base_height * i)
-                                    : base_height;
-            entry->widths[i] = region_height;
-            entry->textures[i] = create_gl_texture_from_cairo_region(
-                cairo_surface, state->orientation, y_offset, region_height,
-                img_width, img_height);
-            expect(entry->textures[i]);
-        }
-        entry->texture_height = img_width;
+    int full_split =
+        (state->orientation == SPLIT_HORIZONTAL) ? img_width : img_height;
+    int base_split = full_split / state->num_ctx;
+    entry->texture_height =
+        (state->orientation == SPLIT_HORIZONTAL) ? img_height : img_width;
+
+    for (int i = 0; i < state->num_ctx; i++) {
+        int offset = i * base_split;
+        int region_size = (i == state->num_ctx - 1)
+                              ? (full_split - base_split * i)
+                              : base_split;
+        entry->widths[i] = region_size;
+        entry->textures[i] = create_gl_texture_from_cairo_region(
+            cairo_surface, state->orientation, offset, region_size, img_width,
+            img_height);
+        expect(entry->textures[i]);
     }
+
     fprintf(stderr, "Cache page %d created.\n", page_index);
     return entry;
 }
