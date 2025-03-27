@@ -426,6 +426,24 @@ static void framebuffer_size_callback(GLFWwindow *window, int width,
     }
 }
 
+void update_window_textures(struct prog_state *state) {
+    struct render_cache_entry *entry =
+        state->cache_entries[state->current_page];
+    for (int i = 0; i < state->num_ctx; i++) {
+        glfwMakeContextCurrent(state->ctx[i].window);
+        int natural_width, natural_height;
+        if (state->orientation == SPLIT_HORIZONTAL) {
+            natural_width = entry->widths[i];
+            natural_height = entry->texture_height;
+        } else {
+            natural_width = entry->texture_height;
+            natural_height = entry->widths[i];
+        }
+        present_texture(state->ctx[i].window, entry->textures[i], natural_width,
+                        natural_height);
+    }
+}
+
 static int handle_glfw_events(struct prog_state *state) {
     for (int i = 0; i < state->num_ctx; i++) {
         glfwSetKeyCallback(state->ctx[i].window, key_callback);
@@ -440,22 +458,7 @@ static int handle_glfw_events(struct prog_state *state) {
     state->cache_entries[state->current_page] =
         create_cache_entry(state->current_page, state);
     if (state->cache_entries[state->current_page]) {
-        for (int i = 0; i < state->num_ctx; i++) {
-            glfwMakeContextCurrent(state->ctx[i].window);
-            if (state->orientation == SPLIT_HORIZONTAL) {
-                present_texture(
-                    state->ctx[i].window,
-                    state->cache_entries[state->current_page]->textures[i],
-                    state->cache_entries[state->current_page]->widths[i],
-                    state->cache_entries[state->current_page]->texture_height);
-            } else {
-                present_texture(
-                    state->ctx[i].window,
-                    state->cache_entries[state->current_page]->textures[i],
-                    state->cache_entries[state->current_page]->texture_height,
-                    state->cache_entries[state->current_page]->widths[i]);
-            }
-        }
+        update_window_textures(state);
     }
 
     while (!glfwWindowShouldClose(state->ctx[0].window)) {
@@ -466,24 +469,7 @@ static int handle_glfw_events(struct prog_state *state) {
             cache_one_slide(state->cache_entries, state->num_pages, state);
         }
         if (state->cache_entries[state->current_page]) {
-            for (int i = 0; i < state->num_ctx; i++) {
-                glfwMakeContextCurrent(state->ctx[i].window);
-                if (state->orientation == SPLIT_HORIZONTAL) {
-                    present_texture(
-                        state->ctx[i].window,
-                        state->cache_entries[state->current_page]->textures[i],
-                        state->cache_entries[state->current_page]->widths[i],
-                        state->cache_entries[state->current_page]
-                            ->texture_height);
-                } else {
-                    present_texture(
-                        state->ctx[i].window,
-                        state->cache_entries[state->current_page]->textures[i],
-                        state->cache_entries[state->current_page]
-                            ->texture_height,
-                        state->cache_entries[state->current_page]->widths[i]);
-                }
-            }
+            update_window_textures(state);
         }
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
