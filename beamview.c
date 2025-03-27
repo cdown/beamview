@@ -496,7 +496,7 @@ static int handle_glfw_events(struct prog_state *state) {
         if (state->cache_complete)
             glfwWaitEvents();
         else {
-            glfwWaitEventsTimeout(0.01);
+            glfwPollEvents(); // If a key has been pressed, that takes priority
             cache_one_slide(state->cache_entries, state->num_pages, state);
         }
         if (state->cache_entries[state->current_page]) {
