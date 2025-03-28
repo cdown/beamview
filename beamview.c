@@ -412,6 +412,7 @@ static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
 void update_window_textures(struct prog_state *state) {
     struct render_cache_entry *entry =
         state->cache_entries[state->current_page];
+    expect(entry);
     for (int i = 0; i < state->num_ctx; i++) {
         present_texture(state->ctx[i].window, entry->textures[i],
                         entry->widths[i], entry->texture_height);
