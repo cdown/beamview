@@ -399,6 +399,7 @@ void update_window_textures(struct prog_state *state) {
         present_texture(state->ctx[i].window, entry->textures[i],
                         entry->widths[i], entry->texture_height);
     }
+    state->needs_redraw = 0;
 }
 
 static void window_refresh_callback(GLFWwindow *window) {
@@ -423,7 +424,6 @@ static void handle_glfw_events(struct prog_state *state) {
         create_cache_entry(state->current_page, state);
     if (state->cache_entries[state->current_page]) {
         update_window_textures(state);
-        state->needs_redraw = 0;
     }
 
     while (!glfwWindowShouldClose(state->ctx[0].window)) {
@@ -435,7 +435,6 @@ static void handle_glfw_events(struct prog_state *state) {
         }
         if (state->needs_redraw && state->cache_entries[state->current_page]) {
             update_window_textures(state);
-            state->needs_redraw = 0;
         }
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
