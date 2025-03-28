@@ -103,7 +103,7 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
         glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
-        double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
+        double scale_i = fmin((double)win_width / (pdf_width / num_ctx),
                               (double)win_height / pdf_height);
         scale = fmax(scale, scale_i);
     }
