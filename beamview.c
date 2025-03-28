@@ -43,6 +43,12 @@ struct prog_state {
     fz_context *fz_ctx;
     int cache_complete, current_page, num_pages;
     struct render_cache_entry **cache_entries;
+
+    // You might wonder why we need this and we don't just unconditionally
+    // redraw after each GLFW event. That works fine on X11, but on Wayland it
+    // burns up the CPU because the buffer swap itself causes an event. See
+    // https://github.com/glfw/glfw/issues/1911.
+    int needs_redraw;
 };
 
 static void present_texture(GLFWwindow *window, GLuint texture,
@@ -324,6 +330,7 @@ static void update_scale(struct prog_state *state) {
         state->cache_complete = 0;
         state->cache_entries[state->current_page] =
             create_cache_entry(state->current_page, state);
+        state->needs_redraw = 1;
     }
 }
 
@@ -373,6 +380,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action,
                 create_cache_entry(new_page, state);
         }
         state->current_page = new_page;
+        state->needs_redraw = 1;
     }
 }
 
@@ -393,11 +401,18 @@ void update_window_textures(struct prog_state *state) {
     }
 }
 
+static void window_refresh_callback(GLFWwindow *window) {
+    struct prog_state *state = glfwGetWindowUserPointer(window);
+    update_window_textures(state);
+}
+
 static void handle_glfw_events(struct prog_state *state) {
     for (int i = 0; i < state->num_ctx; i++) {
         glfwSetKeyCallback(state->ctx[i].window, key_callback);
         glfwSetFramebufferSizeCallback(state->ctx[i].window,
                                        framebuffer_size_callback);
+        glfwSetWindowRefreshCallback(state->ctx[i].window,
+                                     window_refresh_callback);
         glfwSetWindowUserPointer(state->ctx[i].window, state);
     }
 
@@ -408,6 +423,7 @@ static void handle_glfw_events(struct prog_state *state) {
         create_cache_entry(state->current_page, state);
     if (state->cache_entries[state->current_page]) {
         update_window_textures(state);
+        state->needs_redraw = 0;
     }
 
     while (!glfwWindowShouldClose(state->ctx[0].window)) {
@@ -417,8 +433,9 @@ static void handle_glfw_events(struct prog_state *state) {
             glfwPollEvents(); // If a key has been pressed, that takes priority
             cache_one_slide(state->cache_entries, state->num_pages, state);
         }
-        if (state->cache_entries[state->current_page]) {
+        if (state->needs_redraw && state->cache_entries[state->current_page]) {
             update_window_textures(state);
+            state->needs_redraw = 0;
         }
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
@@ -446,6 +463,7 @@ int main(int argc, char *argv[]) {
 
     ps.current_scale =
         compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
+    ps.needs_redraw = 1;
 
     handle_glfw_events(&ps);
 
