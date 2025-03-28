@@ -149,6 +149,7 @@ create_gl_texture_from_cairo_region(cairo_surface_t *cairo_surface, int offset,
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
+    expect(cairo_data);
 
     GLuint texture;
     glGenTextures(1, &texture);
