@@ -128,6 +128,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
     expect(surface);
     cairo_t *cr = cairo_create(surface);
+    expect(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
 
     // If the background is transparent, the user probably expects white
