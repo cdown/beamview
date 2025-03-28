@@ -214,17 +214,11 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
 }
 
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
-    char resolved_path[PATH_MAX];
-    if (!realpath(pdf_file, resolved_path)) {
-        fprintf(stderr, "Error opening %s: %s\n", pdf_file, strerror(errno));
-        return -errno;
-    }
-
     state->fz_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
     expect(state->fz_ctx);
     fz_register_document_handlers(state->fz_ctx);
 
-    state->document = fz_open_document(state->fz_ctx, resolved_path);
+    state->document = fz_open_document(state->fz_ctx, pdf_file);
     if (!state->document) {
         fprintf(stderr, "Error opening PDF.\n");
         fz_drop_context(state->fz_ctx);
