@@ -43,7 +43,7 @@ struct prog_state {
     double pdf_width, pdf_height, current_scale;
     fz_document *document;
     fz_context *fz_ctx;
-    int cache_complete, current_page, num_pages;
+    int current_page, num_pages, next_cache_index;
     struct render_cache_entry **cache_entries;
 
     // You might wonder why we need this and we don't just unconditionally
@@ -193,24 +193,23 @@ static void free_all_cache_entries(struct render_cache_entry **cache_entries,
     }
 }
 
+static int cache_complete(struct prog_state *state) {
+    return state->next_cache_index == state->num_pages;
+}
+
 static void cache_one_slide(struct render_cache_entry **cache_entries,
                             int num_pages, struct prog_state *state) {
-    if (state->cache_complete)
+    if (cache_complete(state))
         return;
 
-    int complete = 1;
-    for (int i = 0; i < num_pages; i++) {
-        if (!cache_entries[i]) {
-            cache_entries[i] = create_cache_entry(i, state);
-            complete = 0;
-            // Render one missing slide per idle cycle.
-            break;
-        }
+    int i = state->next_cache_index;
+    while (i < num_pages && cache_entries[i])
+        i++;
+
+    if (i < num_pages) {
+        cache_entries[i] = create_cache_entry(i, state);
+        state->next_cache_index = i + 1;
     }
-    if (complete) {
-        fprintf(stderr, "Caching complete.\n");
-    }
-    state->cache_complete = complete;
 }
 
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
@@ -242,7 +241,7 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     fz_drop_page(state->fz_ctx, first_page);
 
     state->current_scale = 1.0;
-    state->cache_complete = 0;
+    state->next_cache_index = 0;
 
     return 0;
 }
@@ -323,7 +322,7 @@ static void update_scale(struct prog_state *state) {
         state->current_scale = new_scale;
         fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
         free_all_cache_entries(state->cache_entries, state->num_pages);
-        state->cache_complete = 0;
+        state->next_cache_index = 0;
         state->cache_entries[state->current_page] =
             create_cache_entry(state->current_page, state);
         state->needs_redraw = 1;
@@ -423,7 +422,7 @@ static void handle_glfw_events(struct prog_state *state) {
     }
 
     while (!glfwWindowShouldClose(state->ctx[0].window)) {
-        if (state->cache_complete)
+        if (cache_complete(state))
             glfwWaitEvents();
         else {
             glfwPollEvents(); // If a key has been pressed, that takes priority
