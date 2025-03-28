@@ -29,6 +29,7 @@ presentation. Navigate using:
 | Left Arrow, Up Arrow, Page Up   | Previous slide  |
 | Right Arrow, Down Arrow, Page Down | Next slide  |
 | Shift+Q                         | Quit           |
+| Shift+F                         | Fullscreen     |
 
 The windows will automatically scale content to fit, and you can resize them as
 needed.

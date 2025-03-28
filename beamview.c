@@ -39,6 +39,8 @@ struct texture_data {
 struct gl_ctx {
     GLFWwindow *window;
     struct texture_data texture;
+    int is_fullscreen;
+    int windowed_x, windowed_y, windowed_width, windowed_height;
 };
 
 struct render_cache_entry {
@@ -271,6 +273,60 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     return 0;
 }
 
+static GLFWmonitor *get_current_monitor(GLFWwindow *window) {
+    int window_x, window_y, window_width, window_height;
+    glfwGetWindowPos(window, &window_x, &window_y);
+    glfwGetWindowSize(window, &window_width, &window_height);
+
+    int window_center_x = window_x + window_width / 2;
+    int window_center_y = window_y + window_height / 2;
+
+    int monitor_count;
+    GLFWmonitor **monitors = glfwGetMonitors(&monitor_count);
+
+    if (!monitors || monitor_count == 0) {
+        return glfwGetPrimaryMonitor();
+    }
+
+    for (int i = 0; i < monitor_count; i++) {
+        int monitor_x, monitor_y;
+        glfwGetMonitorPos(monitors[i], &monitor_x, &monitor_y);
+
+        const GLFWvidmode *mode = glfwGetVideoMode(monitors[i]);
+        if (!mode)
+            continue;
+
+        if (window_center_x >= monitor_x &&
+            window_center_x < monitor_x + mode->width &&
+            window_center_y >= monitor_y &&
+            window_center_y < monitor_y + mode->height) {
+            return monitors[i];
+        }
+    }
+
+    return glfwGetPrimaryMonitor();
+}
+
+static void toggle_fullscreen(struct gl_ctx *ctx) {
+    if (ctx->is_fullscreen) {
+        glfwSetWindowMonitor(ctx->window, NULL, ctx->windowed_x,
+                             ctx->windowed_y, ctx->windowed_width,
+                             ctx->windowed_height, GLFW_DONT_CARE);
+        ctx->is_fullscreen = 0;
+    } else {
+        glfwGetWindowPos(ctx->window, &ctx->windowed_x, &ctx->windowed_y);
+        glfwGetWindowSize(ctx->window, &ctx->windowed_width,
+                          &ctx->windowed_height);
+        GLFWmonitor *monitor = get_current_monitor(ctx->window);
+        if (monitor) {
+            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
+            glfwSetWindowMonitor(ctx->window, monitor, 0, 0, mode->width,
+                                 mode->height, mode->refreshRate);
+            ctx->is_fullscreen = 1;
+        }
+    }
+}
+
 static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
     int base = (int)pdf_width / num_ctx;
@@ -286,6 +342,19 @@ static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     }
 }
 
+static void update_scale(struct prog_state *state) {
+    double new_scale = compute_scale(state->ctx, state->num_ctx,
+                                     state->pdf_width, state->pdf_height);
+    if (fabs(new_scale - state->current_scale) > 0.01) {
+        state->current_scale = new_scale;
+        fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
+        free_all_cache_entries(state->cache_entries, state->num_pages);
+        state->cache_complete = 0;
+        state->cache_entries[state->current_page] =
+            create_cache_entry(state->current_page, state);
+    }
+}
+
 static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
                          int action, int mods) {
     if (action != GLFW_PRESS)
@@ -295,6 +364,17 @@ static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
     if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
         for (int i = 0; i < state->num_ctx; i++)
             glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
+        return;
+    }
+
+    if (key == GLFW_KEY_F && (mods & GLFW_MOD_SHIFT)) {
+        for (int i = 0; i < state->num_ctx; i++) {
+            if (window == state->ctx[i].window) {
+                toggle_fullscreen(&state->ctx[i]);
+                break;
+            }
+        }
+        update_scale(state);
         return;
     }
 
@@ -324,17 +404,7 @@ static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
 
 static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
                                       _unused_ int height) {
-    struct prog_state *state = glfwGetWindowUserPointer(window);
-    double new_scale = compute_scale(state->ctx, state->num_ctx,
-                                     state->pdf_width, state->pdf_height);
-    if (fabs(new_scale - state->current_scale) > 0.01) {
-        state->current_scale = new_scale;
-        fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
-        free_all_cache_entries(state->cache_entries, state->num_pages);
-        state->cache_complete = 0;
-        state->cache_entries[state->current_page] =
-            create_cache_entry(state->current_page, state);
-    }
+    update_scale(glfwGetWindowUserPointer(window));
 }
 
 void update_window_textures(struct prog_state *state) {
