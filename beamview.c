@@ -241,7 +241,7 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     char resolved_path[PATH_MAX];
     if (!realpath(pdf_file, resolved_path)) {
-        perror("realpath");
+        fprintf(stderr, "Error opening %s: %s\n", pdf_file, strerror(errno));
         return -errno;
     }
     char *uri = g_strdup_printf("file://%s", resolved_path);
@@ -459,7 +459,8 @@ int main(int argc, char *argv[]) {
 
     expect(glfwInit());
     struct prog_state ps = {0};
-    expect(init_prog_state(&ps, pdf_file) == 0);
+    if (init_prog_state(&ps, pdf_file) < 0)
+        return EXIT_FAILURE;
     ps.num_ctx = NUM_CONTEXTS;
     ps.num_pages = poppler_document_get_n_pages(ps.document);
     ps.cache_entries =
