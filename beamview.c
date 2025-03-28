@@ -1,10 +1,9 @@
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
-#include <cairo.h>
 #include <errno.h>
-#include <glib.h>
+#include <limits.h>
 #include <math.h>
-#include <poppler/glib/poppler.h>
+#include <mupdf/fitz.h>
 #include <stdio.h>
 
 #define expect(x)                                                              \
@@ -15,19 +14,6 @@
             abort();                                                           \
         }                                                                      \
     } while (0)
-#define _drop_(x) __attribute__((cleanup(drop_##x)))
-#define _unused_ __attribute__((unused))
-
-static inline void drop_cairo_surface_destroy(cairo_surface_t **surface) {
-    if (*surface)
-        cairo_surface_destroy(*surface);
-}
-
-static inline void drop_g_object_unref(void *objp) {
-    GObject **obj = (GObject **)objp;
-    if (*obj)
-        g_object_unref(*obj);
-}
 
 #define NUM_CONTEXTS 2
 
@@ -53,7 +39,8 @@ struct prog_state {
     struct gl_ctx *ctx;
     int num_ctx;
     double pdf_width, pdf_height, current_scale;
-    PopplerDocument *document;
+    fz_document *document;
+    fz_context *fz_ctx;
     int cache_complete, current_page, num_pages;
     struct render_cache_entry **cache_entries;
 };
@@ -115,53 +102,34 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
     return scale;
 }
 
-static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
-                                                     double scale,
-                                                     int *img_width,
-                                                     int *img_height) {
-    double page_width, page_height;
-    poppler_page_get_size(page, &page_width, &page_height);
-    *img_width = (int)(page_width * scale);
-    *img_height = (int)(page_height * scale);
-
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, *img_width, *img_height);
-    expect(surface);
-    cairo_t *cr = cairo_create(surface);
-    expect(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
-    cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
-
-    // If the background is transparent, the user probably expects white
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-
-    cairo_scale(cr, scale, scale);
-    poppler_page_render(page, cr);
-    cairo_surface_flush(surface);
-    cairo_destroy(cr);
-    expect(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-    return surface;
+static fz_pixmap *render_page_to_pixmap(int page_index,
+                                        struct prog_state *state,
+                                        int *img_width, int *img_height) {
+    fz_matrix ctm = fz_scale(state->current_scale, state->current_scale);
+    fz_pixmap *pix = fz_new_pixmap_from_page_number(
+        state->fz_ctx, state->document, page_index, ctm,
+        fz_device_rgb(state->fz_ctx), 0);
+    expect(pix);
+    *img_width = pix->w;
+    *img_height = pix->h;
+    return pix;
 }
 
-static GLuint
-create_gl_texture_from_cairo_region(cairo_surface_t *cairo_surface, int offset,
-                                    int region_size, int full_height) {
-    int cairo_width = cairo_image_surface_get_width(cairo_surface);
-    int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
-    unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
-    expect(cairo_data);
-
+static GLuint create_gl_texture_from_pixmap_region(fz_pixmap *pix, int offset_x,
+                                                   int region_width,
+                                                   int full_height) {
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, pix->stride / pix->n);
+    unsigned char *start_ptr = pix->samples + offset_x * pix->n;
     GLuint texture;
     glGenTextures(1, &texture);
     expect(texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, cairo_stride / 4);
-    expect(offset >= 0 && region_size > 0);
-    expect(offset + region_size <= cairo_width);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, region_size, full_height, 0,
-                 GL_BGRA, GL_UNSIGNED_BYTE, cairo_data + offset * 4);
+    GLenum format = (pix->n == 4) ? GL_RGBA : GL_RGB;
+    glTexImage2D(GL_TEXTURE_2D, 0, format, region_width, full_height, 0, format,
+                 GL_UNSIGNED_BYTE, start_ptr);
     return texture;
 }
 
@@ -177,15 +145,10 @@ static void free_cache_entry(struct render_cache_entry *entry) {
 
 static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
-    _drop_(g_object_unref) PopplerPage *page =
-        poppler_document_get_page(state->document, page_index);
-    expect(page);
-
     int img_width, img_height;
-    _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
-        render_page_to_cairo_surface(page, state->current_scale, &img_width,
-                                     &img_height);
-    expect(cairo_surface);
+    fz_pixmap *pix =
+        render_page_to_pixmap(page_index, state, &img_width, &img_height);
+    expect(pix);
 
     struct render_cache_entry *entry =
         malloc(sizeof(struct render_cache_entry));
@@ -197,16 +160,18 @@ static struct render_cache_entry *create_cache_entry(int page_index,
 
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
-        int region_size = (i == state->num_ctx - 1)
-                              ? (img_width - base_split * i)
-                              : base_split;
-        entry->widths[i] = region_size;
-        entry->textures[i] = create_gl_texture_from_cairo_region(
-            cairo_surface, offset, region_size, img_height);
+        int region_width = (i == state->num_ctx - 1)
+                               ? (img_width - base_split * i)
+                               : base_split;
+
+        entry->widths[i] = region_width;
+        entry->textures[i] = create_gl_texture_from_pixmap_region(
+            pix, offset, region_width, img_height);
         expect(entry->textures[i]);
     }
 
     fprintf(stderr, "Cache page %d created.\n", page_index);
+    fz_drop_pixmap(state->fz_ctx, pix);
     return entry;
 }
 
@@ -246,28 +211,33 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
         fprintf(stderr, "Error opening %s: %s\n", pdf_file, strerror(errno));
         return -errno;
     }
-    char *uri = g_strdup_printf("file://%s", resolved_path);
-    GError *error = NULL;
-    state->document = poppler_document_new_from_file(uri, NULL, &error);
-    g_free(uri);
+
+    state->fz_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+    expect(state->fz_ctx);
+    fz_register_document_handlers(state->fz_ctx);
+
+    state->document = fz_open_document(state->fz_ctx, resolved_path);
     if (!state->document) {
-        fprintf(stderr, "Error opening PDF: %s\n", error->message);
-        g_error_free(error);
+        fprintf(stderr, "Error opening PDF.\n");
+        fz_drop_context(state->fz_ctx);
         return -EIO;
     }
 
-    int num_pages = poppler_document_get_n_pages(state->document);
+    int num_pages = fz_count_pages(state->fz_ctx, state->document);
     if (num_pages <= 0) {
         fprintf(stderr, "PDF has no pages.\n");
-        g_object_unref(state->document);
-        state->document = NULL;
+        fz_drop_document(state->fz_ctx, state->document);
+        fz_drop_context(state->fz_ctx);
         return -EINVAL;
     }
+    state->num_pages = num_pages;
 
-    _drop_(g_object_unref) PopplerPage *first_page =
-        poppler_document_get_page(state->document, 0);
+    fz_page *first_page = fz_load_page(state->fz_ctx, state->document, 0);
     expect(first_page);
-    poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
+    fz_rect bounds = fz_bound_page(state->fz_ctx, first_page);
+    state->pdf_width = bounds.x1 - bounds.x0;
+    state->pdf_height = bounds.y1 - bounds.y0;
+    fz_drop_page(state->fz_ctx, first_page);
 
     state->current_scale = 1.0;
     state->cache_complete = 0;
@@ -357,8 +327,10 @@ static void update_scale(struct prog_state *state) {
     }
 }
 
-static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
-                         int action, int mods) {
+static void key_callback(GLFWwindow *window, int key, int scancode, int action,
+                         int mods) {
+    (void)scancode;
+
     if (action != GLFW_PRESS)
         return;
 
@@ -404,8 +376,10 @@ static void key_callback(GLFWwindow *window, int key, _unused_ int scancode,
     }
 }
 
-static void framebuffer_size_callback(GLFWwindow *window, _unused_ int width,
-                                      _unused_ int height) {
+static void framebuffer_size_callback(GLFWwindow *window, int width,
+                                      int height) {
+    (void)width;
+    (void)height;
     update_scale(glfwGetWindowUserPointer(window));
 }
 
@@ -452,20 +426,17 @@ static void handle_glfw_events(struct prog_state *state) {
 }
 
 int main(int argc, char *argv[]) {
-    const char *pdf_file = NULL;
-
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <pdf_file>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    pdf_file = argv[1];
+    const char *pdf_file = argv[1];
 
     expect(glfwInit());
     struct prog_state ps = {0};
     if (init_prog_state(&ps, pdf_file) < 0)
         return EXIT_FAILURE;
     ps.num_ctx = NUM_CONTEXTS;
-    ps.num_pages = poppler_document_get_n_pages(ps.document);
     ps.cache_entries =
         calloc(ps.num_pages, sizeof(struct render_cache_entry *));
     expect(ps.cache_entries);
@@ -478,7 +449,9 @@ int main(int argc, char *argv[]) {
 
     handle_glfw_events(&ps);
 
-    g_object_unref(ps.document);
+    fz_drop_document(ps.fz_ctx, ps.document);
+    fz_drop_context(ps.fz_ctx);
+
     for (int i = 0; i < ps.num_ctx; i++) {
         if (ps.ctx[i].window)
             glfwDestroyWindow(ps.ctx[i].window);

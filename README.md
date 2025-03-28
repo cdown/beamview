@@ -5,7 +5,7 @@ A dual-screen PDF viewer for presenting Beamer presentations with notes.
 ## Features
 
 - Dual-screen mode: allows viewing presentation notes while presenting slides
-- OpenGL/GLFW-based rendering for high performance
+- MuPDF/OpenGL-based rendering for high performance
 - Slide pre-rendering and caching for instantaneous navigation
 - Simple keyboard navigation
 - Minimal resource usage
@@ -40,9 +40,7 @@ Run `make` to compile. You will need the following dependencies:
 
 - GLFW3
 - OpenGL
-- Cairo
-- Poppler
-- GLib
+- libmupdf
 
 ## Comparison with other tools
 
