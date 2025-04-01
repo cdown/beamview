@@ -18,6 +18,7 @@
     } while (0)
 
 #define NUM_CONTEXTS 2
+#define TEXEL_ADJUSTMENT 0.001f
 
 struct texture_data {
     GLuint texture;
@@ -77,12 +78,19 @@ static void present_texture(GLFWwindow *window, GLuint texture,
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    const GLfloat left = (GLfloat)((win_width - new_width) / 2);
-    const GLfloat top = (GLfloat)((win_height - new_height) / 2);
+    // We need to align with pixel centers to avoid blending artefacts
+    const GLfloat left = floor((win_width - new_width) / 2.0f) + 0.5f;
+    const GLfloat top = floor((win_height - new_height) / 2.0f) + 0.5f;
     const GLfloat right = left + new_width;
     const GLfloat bottom = top + new_height;
+
     GLfloat vertices[] = {left, top, right, top, right, bottom, left, bottom};
-    GLfloat tex_coords[] = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f};
+    // We shrink texture coords slightly to avoid sampling beyond edge, which
+    // would cause artefacts
+    GLfloat tex_coords[] = {TEXEL_ADJUSTMENT,        TEXEL_ADJUSTMENT,
+                            1.0f - TEXEL_ADJUSTMENT, TEXEL_ADJUSTMENT,
+                            1.0f - TEXEL_ADJUSTMENT, 1.0f - TEXEL_ADJUSTMENT,
+                            TEXEL_ADJUSTMENT,        1.0f - TEXEL_ADJUSTMENT};
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -99,12 +107,15 @@ static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
                 pdf_width, pdf_height);
         return 1.0;
     }
+
+    const double texel_adjust_factor = 1.0 - (2 * TEXEL_ADJUSTMENT);
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
         glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
-        double scale_i = fmin((double)win_width / (pdf_width / num_ctx),
-                              (double)win_height / pdf_height);
+        double scale_i = fmin(
+            (double)win_width / (pdf_width / num_ctx * texel_adjust_factor),
+            (double)win_height / (pdf_height * texel_adjust_factor));
         scale = fmax(scale, scale_i);
     }
     return scale;
