@@ -28,6 +28,7 @@
 
 DEFINE_DROP_FUNC(SDL_Surface *, SDL_FreeSurface)
 DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
+DEFINE_DROP_FUNC(cairo_t *, cairo_destroy)
 DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
 
 #define expect(x)                                                              \
@@ -118,7 +119,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
 
     cairo_surface_t *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
-    cairo_t *cr = cairo_create(surface);
+    _drop_(cairo_destroy) cairo_t *cr = cairo_create(surface);
     expect(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
 
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
@@ -130,9 +131,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
 
     cairo_pattern_t *pattern = cairo_get_source(cr);
     cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
-
     cairo_surface_flush(surface);
-    cairo_destroy(cr);
 
     return surface;
 }
