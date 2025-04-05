@@ -49,7 +49,7 @@ struct sdl_ctx {
     SDL_Window *window;
     SDL_Renderer *renderer;
     struct texture_data texture;
-    int is_fullscreen, windowed_x, windowed_y, windowed_width, windowed_height;
+    int is_fullscreen;
 };
 
 struct render_cache_entry {
@@ -68,13 +68,7 @@ struct prog_state {
 static void toggle_fullscreen(struct sdl_ctx *ctx) {
     if (ctx->is_fullscreen) {
         SDL_SetWindowFullscreen(ctx->window, 0);
-        SDL_SetWindowPosition(ctx->window, ctx->windowed_x, ctx->windowed_y);
-        SDL_SetWindowSize(ctx->window, ctx->windowed_width,
-                          ctx->windowed_height);
     } else {
-        SDL_GetWindowPosition(ctx->window, &ctx->windowed_x, &ctx->windowed_y);
-        SDL_GetWindowSize(ctx->window, &ctx->windowed_width,
-                          &ctx->windowed_height);
         SDL_SetWindowFullscreen(ctx->window, SDL_WINDOW_FULLSCREEN_DESKTOP);
     }
     ctx->is_fullscreen = !ctx->is_fullscreen;
