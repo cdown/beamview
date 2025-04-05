@@ -203,34 +203,12 @@ static struct render_cache_entry *create_cache_entry(int page_index,
         _drop_(SDL_FreeSurface) SDL_Surface *surface =
             create_sdl_surface_from_cairo(cairo_surface, offset, region_width,
                                           img_height);
-        if (!surface) {
-            fprintf(stderr,
-                    "Failed to create SDL surface for page %d, region %d\n",
-                    page_index, i);
-            for (int j = 0; j < i; j++) {
-                if (entry->textures[j]) {
-                    SDL_DestroyTexture(entry->textures[j]);
-                }
-            }
-            free(entry);
-            return NULL;
-        }
+        expect(surface);
 
         entry->widths[i] = region_width;
         entry->textures[i] =
             SDL_CreateTextureFromSurface(state->ctx[i].renderer, surface);
-        if (!entry->textures[i]) {
-            fprintf(
-                stderr,
-                "Failed to create SDL texture for page %d, context %d: %s\n",
-                page_index, i, SDL_GetError());
-            for (int j = 0; j < i; j++) {
-                if (entry->textures[j])
-                    SDL_DestroyTexture(entry->textures[j]);
-            }
-            free(entry);
-            return NULL;
-        }
+        expect(entry->textures[i]);
     }
 
     fprintf(stderr, "Cache page %d created.\n", page_index);
