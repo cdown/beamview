@@ -1,5 +1,5 @@
-CFLAGS = -Wall -Wextra -pedantic -O2 `pkg-config --cflags glfw3 mupdf`
-LIBS = `pkg-config --libs glfw3 mupdf` -lGL -lm
+CFLAGS = -Wall -Wextra -pedantic -O2 `pkg-config --cflags sdl2 poppler-glib cairo`
+LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm
 
 all: beamview
 

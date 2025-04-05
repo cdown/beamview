@@ -5,11 +5,11 @@ A dual-screen PDF viewer for presenting Beamer presentations with notes.
 ## Features
 
 - Dual-screen mode: allows viewing presentation notes while presenting slides
-- MuPDF/OpenGL-based rendering for high performance
+- Poppler/Cairo/SDL-based rendering for high performance
 - Slide pre-rendering and caching for instantaneous navigation
 - Simple keyboard navigation
 - Minimal resource usage
-- Clean, simple codebase (~400 lines)
+- Clean, simple codebase (~500 lines)
 
 ## Usage
 
@@ -38,9 +38,9 @@ needed.
 
 Run `make` to compile. You will need the following dependencies:
 
-- GLFW3
-- OpenGL
-- libmupdf
+- poppler-glib
+- SDL2
+- Cairo
 
 ## Comparison with other tools
 

@@ -1,12 +1,33 @@
-#include <GL/gl.h>
-#include <GLFW/glfw3.h>
+#include <SDL2/SDL.h>
+#include <cairo.h>
 #include <errno.h>
+#include <glib.h>
 #include <limits.h>
 #include <math.h>
-#include <mupdf/fitz.h>
+#include <poppler.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define _drop_(x) __attribute__((cleanup(drop_##x)))
+
+#define DEFINE_DROP_FUNC(type, func)                                           \
+    static inline void drop_##func(type *p) {                                  \
+        if (*p)                                                                \
+            func(*p);                                                          \
+    }
+
+#define DEFINE_DROP_FUNC_COERCE(type, func)                                    \
+    static inline void drop_##func(void *p) {                                  \
+        type *pp = (type *)p;                                                  \
+        if (*pp) {                                                             \
+            func((type) * pp);                                                 \
+        }                                                                      \
+    }
+
+DEFINE_DROP_FUNC(SDL_Surface *, SDL_FreeSurface)
+DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
+DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
 
 #define expect(x)                                                              \
     do {                                                                       \
@@ -18,138 +39,147 @@
     } while (0)
 
 #define NUM_CONTEXTS 2
-#define TEXEL_ADJUSTMENT 0.001f
 
 struct texture_data {
-    GLuint texture;
+    SDL_Texture *texture;
     int natural_width, natural_height;
 };
 
-struct gl_ctx {
-    GLFWwindow *window;
+struct sdl_ctx {
+    SDL_Window *window;
+    SDL_Renderer *renderer;
     struct texture_data texture;
-    int is_fullscreen;
-    int windowed_x, windowed_y, windowed_width, windowed_height;
+    int is_fullscreen, windowed_x, windowed_y, windowed_width, windowed_height;
 };
 
 struct render_cache_entry {
-    int page_index;
-    GLuint textures[NUM_CONTEXTS];
-    int widths[NUM_CONTEXTS], texture_height;
+    SDL_Texture *textures[NUM_CONTEXTS];
+    int page_index, widths[NUM_CONTEXTS], texture_height;
 };
 
 struct prog_state {
-    struct gl_ctx *ctx;
-    int num_ctx;
+    struct sdl_ctx *ctx;
     double pdf_width, pdf_height, current_scale;
-    fz_document *document;
-    fz_context *fz_ctx;
-    int current_page, num_pages, next_cache_index;
+    PopplerDocument *document;
+    int num_ctx, current_page, num_pages, next_cache_index, needs_redraw;
     struct render_cache_entry **cache_entries;
-
-    // You might wonder why we need this and we don't just unconditionally
-    // redraw after each GLFW event. That works fine on X11, but on Wayland it
-    // burns up the CPU because the buffer swap itself causes an event. See
-    // https://github.com/glfw/glfw/issues/1911.
-    int needs_redraw;
 };
 
-static void present_texture(GLFWwindow *window, GLuint texture,
+static void toggle_fullscreen(struct sdl_ctx *ctx) {
+    if (ctx->is_fullscreen) {
+        SDL_SetWindowFullscreen(ctx->window, 0);
+        SDL_SetWindowPosition(ctx->window, ctx->windowed_x, ctx->windowed_y);
+        SDL_SetWindowSize(ctx->window, ctx->windowed_width,
+                          ctx->windowed_height);
+    } else {
+        SDL_GetWindowPosition(ctx->window, &ctx->windowed_x, &ctx->windowed_y);
+        SDL_GetWindowSize(ctx->window, &ctx->windowed_width,
+                          &ctx->windowed_height);
+        SDL_SetWindowFullscreen(ctx->window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+    }
+    ctx->is_fullscreen = !ctx->is_fullscreen;
+}
+
+static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
                             int natural_width, int natural_height) {
     if (!texture)
         return;
 
     int win_width, win_height;
-    glfwGetFramebufferSize(window, &win_width, &win_height);
+    SDL_GetRendererOutputSize(renderer, &win_width, &win_height);
 
     float scale = fmin((float)win_width / natural_width,
                        (float)win_height / natural_height);
     int new_width = (int)(natural_width * scale);
     int new_height = (int)(natural_height * scale);
 
-    glfwMakeContextCurrent(window);
-    glViewport(0, 0, win_width, win_height);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
+    SDL_Rect dst = {(win_width - new_width) / 2, (win_height - new_height) / 2,
+                    new_width, new_height};
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, win_width, win_height, 0, -1, 1);
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    // We need to align with pixel centers to avoid blending artefacts
-    const GLfloat left = floor((win_width - new_width) / 2.0f) + 0.5f;
-    const GLfloat top = floor((win_height - new_height) / 2.0f) + 0.5f;
-    const GLfloat right = left + new_width;
-    const GLfloat bottom = top + new_height;
-
-    GLfloat vertices[] = {left, top, right, top, right, bottom, left, bottom};
-    // We shrink texture coords slightly to avoid sampling beyond edge, which
-    // would cause artefacts
-    GLfloat tex_coords[] = {TEXEL_ADJUSTMENT,        TEXEL_ADJUSTMENT,
-                            1.0f - TEXEL_ADJUSTMENT, TEXEL_ADJUSTMENT,
-                            1.0f - TEXEL_ADJUSTMENT, 1.0f - TEXEL_ADJUSTMENT,
-                            TEXEL_ADJUSTMENT,        1.0f - TEXEL_ADJUSTMENT};
-
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    glVertexPointer(2, GL_FLOAT, 0, vertices);
-    glTexCoordPointer(2, GL_FLOAT, 0, tex_coords);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-    glfwSwapBuffers(window);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer);
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
+    SDL_RenderPresent(renderer);
 }
 
-static double compute_scale(struct gl_ctx ctx[], int num_ctx, double pdf_width,
+static double compute_scale(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
     if (pdf_width <= 0 || pdf_height <= 0) {
         fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
                 pdf_width, pdf_height);
         return 1.0;
     }
-
-    const double texel_adjust_factor = 1.0 - (2 * TEXEL_ADJUSTMENT);
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
-        glfwGetFramebufferSize(ctx[i].window, &win_width, &win_height);
-        double scale_i = fmin(
-            (double)win_width / (pdf_width / num_ctx * texel_adjust_factor),
-            (double)win_height / (pdf_height * texel_adjust_factor));
+        SDL_GetWindowSize(ctx[i].window, &win_width, &win_height);
+        double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
+                              (double)win_height / pdf_height);
         scale = fmax(scale, scale_i);
     }
     return scale;
 }
 
-static fz_pixmap *render_page_to_pixmap(int page_index,
-                                        struct prog_state *state,
-                                        int *img_width, int *img_height) {
-    fz_matrix ctm = fz_scale(state->current_scale, state->current_scale);
-    fz_pixmap *pix = fz_new_pixmap_from_page_number(
-        state->fz_ctx, state->document, page_index, ctm,
-        fz_device_rgb(state->fz_ctx), 0);
-    expect(pix);
-    *img_width = pix->w;
-    *img_height = pix->h;
-    return pix;
+static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
+                                                     double scale,
+                                                     int *img_width,
+                                                     int *img_height) {
+    double page_width, page_height;
+    poppler_page_get_size(page, &page_width, &page_height);
+    *img_width = (int)(page_width * scale);
+    *img_height = (int)(page_height * scale);
+
+    cairo_surface_t *surface = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, *img_width, *img_height);
+    cairo_t *cr = cairo_create(surface);
+    expect(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
+
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_paint(cr);
+
+    cairo_scale(cr, scale, scale);
+    poppler_page_render(page, cr);
+
+    cairo_pattern_t *pattern = cairo_get_source(cr);
+    cairo_pattern_set_filter(pattern, CAIRO_FILTER_BILINEAR);
+
+    cairo_surface_flush(surface);
+    cairo_destroy(cr);
+
+    return surface;
 }
 
-static GLuint create_gl_texture_from_pixmap_region(fz_pixmap *pix, int offset_x,
-                                                   int region_width,
-                                                   int full_height) {
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, pix->stride / pix->n);
-    unsigned char *start_ptr = pix->samples + offset_x * pix->n;
-    GLuint texture;
-    glGenTextures(1, &texture);
-    expect(texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    GLenum format = (pix->n == 4) ? GL_RGBA : GL_RGB;
-    glTexImage2D(GL_TEXTURE_2D, 0, format, region_width, full_height, 0, format,
-                 GL_UNSIGNED_BYTE, start_ptr);
-    return texture;
+static SDL_Surface *
+create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
+                              int region_width, int img_height) {
+    int cairo_width = cairo_image_surface_get_width(cairo_surface);
+    if (x_offset < 0 || region_width <= 0 ||
+        x_offset + region_width > cairo_width) {
+        fprintf(stderr,
+                "Requested region exceeds cairo surface bounds: x_offset=%d, "
+                "region_width=%d, cairo_width=%d\n",
+                x_offset, region_width, cairo_width);
+        return NULL;
+    }
+
+    SDL_Surface *sdl_surface =
+        SDL_CreateRGBSurface(0, region_width, img_height, 32, 0x00FF0000,
+                             0x0000FF00, 0x000000FF, 0xFF000000);
+    if (!sdl_surface)
+        return NULL;
+
+    int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
+    unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
+    expect(cairo_data);
+
+    for (int y = 0; y < img_height; y++) {
+        unsigned char *src_row = cairo_data + y * cairo_stride + x_offset * 4;
+        unsigned char *dst_row =
+            (unsigned char *)sdl_surface->pixels + y * sdl_surface->pitch;
+        memcpy(dst_row, src_row, region_width * 4);
+    }
+    return sdl_surface;
 }
 
 static void free_cache_entry(struct render_cache_entry *entry) {
@@ -157,20 +187,26 @@ static void free_cache_entry(struct render_cache_entry *entry) {
         return;
     for (int i = 0; i < NUM_CONTEXTS; i++) {
         if (entry->textures[i])
-            glDeleteTextures(1, &entry->textures[i]);
+            SDL_DestroyTexture(entry->textures[i]);
     }
     free(entry);
 }
 
 static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
-    int img_width, img_height;
-    fz_pixmap *pix =
-        render_page_to_pixmap(page_index, state, &img_width, &img_height);
-    expect(pix);
+    _drop_(g_object_unref) PopplerPage *page =
+        poppler_document_get_page(state->document, page_index);
+    if (!page) {
+        fprintf(stderr, "Failed to get page %d\n", page_index);
+        return NULL;
+    }
 
-    struct render_cache_entry *entry =
-        malloc(sizeof(struct render_cache_entry));
+    int img_width, img_height;
+    _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
+        render_page_to_cairo_surface(page, state->current_scale, &img_width,
+                                     &img_height);
+
+    struct render_cache_entry *entry = calloc(1, sizeof(*entry));
     expect(entry);
     entry->page_index = page_index;
 
@@ -183,14 +219,40 @@ static struct render_cache_entry *create_cache_entry(int page_index,
                                ? (img_width - base_split * i)
                                : base_split;
 
+        _drop_(SDL_FreeSurface) SDL_Surface *surface =
+            create_sdl_surface_from_cairo(cairo_surface, offset, region_width,
+                                          img_height);
+        if (!surface) {
+            fprintf(stderr,
+                    "Failed to create SDL surface for page %d, region %d\n",
+                    page_index, i);
+            for (int j = 0; j < i; j++) {
+                if (entry->textures[j]) {
+                    SDL_DestroyTexture(entry->textures[j]);
+                }
+            }
+            free(entry);
+            return NULL;
+        }
+
         entry->widths[i] = region_width;
-        entry->textures[i] = create_gl_texture_from_pixmap_region(
-            pix, offset, region_width, img_height);
-        expect(entry->textures[i]);
+        entry->textures[i] =
+            SDL_CreateTextureFromSurface(state->ctx[i].renderer, surface);
+        if (!entry->textures[i]) {
+            fprintf(
+                stderr,
+                "Failed to create SDL texture for page %d, context %d: %s\n",
+                page_index, i, SDL_GetError());
+            for (int j = 0; j < i; j++) {
+                if (entry->textures[j])
+                    SDL_DestroyTexture(entry->textures[j]);
+            }
+            free(entry);
+            return NULL;
+        }
     }
 
     fprintf(stderr, "Cache page %d created.\n", page_index);
-    fz_drop_pixmap(state->fz_ctx, pix);
     return entry;
 }
 
@@ -216,7 +278,6 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
     int i = state->next_cache_index;
     while (i < num_pages && cache_entries[i])
         i++;
-
     if (i < num_pages) {
         cache_entries[i] = create_cache_entry(i, state);
         state->next_cache_index = i + 1;
@@ -224,105 +285,64 @@ static void cache_one_slide(struct render_cache_entry **cache_entries,
 }
 
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
-    state->fz_ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-    expect(state->fz_ctx);
-    fz_register_document_handlers(state->fz_ctx);
+    memset(state, 0, sizeof(*state));
 
-    state->document = fz_open_document(state->fz_ctx, pdf_file);
+    char resolved_path[PATH_MAX];
+    if (!realpath(pdf_file, resolved_path)) {
+        perror("realpath");
+        return -errno;
+    }
+    char *uri = g_strdup_printf("file://%s", resolved_path);
+    GError *error = NULL;
+    state->document = poppler_document_new_from_file(uri, NULL, &error);
+    g_free(uri);
+
     if (!state->document) {
-        fprintf(stderr, "Error opening PDF.\n");
-        fz_drop_context(state->fz_ctx);
+        fprintf(stderr, "Error opening PDF: %s\n", error->message);
+        g_error_free(error);
         return -EIO;
     }
 
-    int num_pages = fz_count_pages(state->fz_ctx, state->document);
+    int num_pages = poppler_document_get_n_pages(state->document);
     if (num_pages <= 0) {
         fprintf(stderr, "PDF has no pages.\n");
-        fz_drop_document(state->fz_ctx, state->document);
-        fz_drop_context(state->fz_ctx);
+        g_object_unref(state->document);
+        state->document = NULL;
         return -EINVAL;
     }
     state->num_pages = num_pages;
 
-    fz_page *first_page = fz_load_page(state->fz_ctx, state->document, 0);
-    expect(first_page);
-    fz_rect bounds = fz_bound_page(state->fz_ctx, first_page);
-    state->pdf_width = bounds.x1 - bounds.x0;
-    state->pdf_height = bounds.y1 - bounds.y0;
-    fz_drop_page(state->fz_ctx, first_page);
+    _drop_(g_object_unref) PopplerPage *first_page =
+        poppler_document_get_page(state->document, 0);
+    if (!first_page) {
+        fprintf(stderr, "Failed to load first page.\n");
+        g_object_unref(state->document);
+        state->document = NULL;
+        return -ENOENT;
+    }
+    poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
 
     state->current_scale = 1.0;
-    state->next_cache_index = 0;
 
     return 0;
 }
 
-static GLFWmonitor *get_current_monitor(GLFWwindow *window) {
-    int window_x, window_y, window_width, window_height;
-    glfwGetWindowPos(window, &window_x, &window_y);
-    glfwGetWindowSize(window, &window_width, &window_height);
-
-    int window_center_x = window_x + window_width / 2;
-    int window_center_y = window_y + window_height / 2;
-
-    int monitor_count;
-    GLFWmonitor **monitors = glfwGetMonitors(&monitor_count);
-
-    if (!monitors || monitor_count == 0) {
-        return glfwGetPrimaryMonitor();
-    }
-
-    for (int i = 0; i < monitor_count; i++) {
-        int monitor_x, monitor_y;
-        glfwGetMonitorPos(monitors[i], &monitor_x, &monitor_y);
-
-        const GLFWvidmode *mode = glfwGetVideoMode(monitors[i]);
-        if (!mode)
-            continue;
-
-        if (window_center_x >= monitor_x &&
-            window_center_x < monitor_x + mode->width &&
-            window_center_y >= monitor_y &&
-            window_center_y < monitor_y + mode->height) {
-            return monitors[i];
-        }
-    }
-
-    return glfwGetPrimaryMonitor();
-}
-
-static void toggle_fullscreen(struct gl_ctx *ctx) {
-    if (ctx->is_fullscreen) {
-        glfwSetWindowMonitor(ctx->window, NULL, ctx->windowed_x,
-                             ctx->windowed_y, ctx->windowed_width,
-                             ctx->windowed_height, GLFW_DONT_CARE);
-        ctx->is_fullscreen = 0;
-    } else {
-        glfwGetWindowPos(ctx->window, &ctx->windowed_x, &ctx->windowed_y);
-        glfwGetWindowSize(ctx->window, &ctx->windowed_width,
-                          &ctx->windowed_height);
-        GLFWmonitor *monitor = get_current_monitor(ctx->window);
-        if (monitor) {
-            const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-            glfwSetWindowMonitor(ctx->window, monitor, 0, 0, mode->width,
-                                 mode->height, mode->refreshRate);
-            ctx->is_fullscreen = 1;
-        }
-    }
-}
-
-static void create_contexts(struct gl_ctx ctx[], int num_ctx, double pdf_width,
+static void create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
     int base = (int)pdf_width / num_ctx;
-    GLFWwindow *share = NULL;
     for (int i = 0; i < num_ctx; i++) {
         int width = (i == num_ctx - 1) ? (int)pdf_width - base * i : base;
         char title[32];
         snprintf(title, sizeof(title), "Context %d", i);
-        ctx[i].window =
-            glfwCreateWindow(width, (int)pdf_height, title, NULL, share);
+        ctx[i].window = SDL_CreateWindow(
+            title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
+            (int)pdf_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
         expect(ctx[i].window);
-        share = ctx[i].window;
+
+        ctx[i].renderer = SDL_CreateRenderer(ctx[i].window, -1,
+                                             SDL_RENDERER_ACCELERATED |
+                                                 SDL_RENDERER_PRESENTVSYNC);
+        expect(ctx[i].renderer);
     }
 }
 
@@ -340,108 +360,106 @@ static void update_scale(struct prog_state *state) {
     }
 }
 
-static void key_callback(GLFWwindow *window, int key, int scancode, int action,
-                         int mods) {
-    (void)scancode;
-
-    if (action != GLFW_PRESS)
-        return;
-
-    struct prog_state *state = glfwGetWindowUserPointer(window);
-    if (key == GLFW_KEY_Q && (mods & GLFW_MOD_SHIFT)) {
-        for (int i = 0; i < state->num_ctx; i++)
-            glfwSetWindowShouldClose(state->ctx[i].window, GLFW_TRUE);
-        return;
-    }
-
-    if (key == GLFW_KEY_F && (mods & GLFW_MOD_SHIFT)) {
-        for (int i = 0; i < state->num_ctx; i++) {
-            if (window == state->ctx[i].window) {
-                toggle_fullscreen(&state->ctx[i]);
-                break;
-            }
-        }
-        update_scale(state);
-        return;
-    }
-
-    int new_page = state->current_page;
-    if ((key == GLFW_KEY_LEFT || key == GLFW_KEY_UP ||
-         key == GLFW_KEY_PAGE_UP) &&
-        state->current_page > 0)
-        new_page = state->current_page - 1;
-    else if ((key == GLFW_KEY_RIGHT || key == GLFW_KEY_DOWN ||
-              key == GLFW_KEY_PAGE_DOWN) &&
-             state->current_page < state->num_pages - 1) {
-        new_page = state->current_page + 1;
-    }
-
-    if (new_page != state->current_page) {
-        if (!state->cache_entries[new_page]) {
-            fprintf(
-                stderr,
-                "Warning: Page %d not cached; performing blocking render.\n",
-                new_page);
-            state->cache_entries[new_page] =
-                create_cache_entry(new_page, state);
-        }
-        state->current_page = new_page;
-        state->needs_redraw = 1;
-    }
-}
-
-static void framebuffer_size_callback(GLFWwindow *window, int width,
-                                      int height) {
-    (void)width;
-    (void)height;
-    update_scale(glfwGetWindowUserPointer(window));
-}
-
-void update_window_textures(struct prog_state *state) {
+static void update_window_textures(struct prog_state *state) {
     struct render_cache_entry *entry =
         state->cache_entries[state->current_page];
     expect(entry);
     for (int i = 0; i < state->num_ctx; i++) {
-        present_texture(state->ctx[i].window, entry->textures[i],
+        present_texture(state->ctx[i].renderer, entry->textures[i],
                         entry->widths[i], entry->texture_height);
     }
     state->needs_redraw = 0;
 }
 
-static void window_refresh_callback(GLFWwindow *window) {
-    struct prog_state *state = glfwGetWindowUserPointer(window);
-    update_window_textures(state);
+static void key_handler(const SDL_Event *event, struct prog_state *state,
+                        int *running) {
+    const SDL_Keycode key = event->key.keysym.sym;
+    const Uint16 mod = event->key.keysym.mod;
+
+    if (key == SDLK_q && (mod & KMOD_SHIFT)) {
+        *running = 0;
+    } else if (key == SDLK_f && (mod & KMOD_SHIFT)) {
+        SDL_Window *win = SDL_GetWindowFromID(event->key.windowID);
+        for (int i = 0; i < state->num_ctx; i++) {
+            if (win == state->ctx[i].window) {
+                toggle_fullscreen(&state->ctx[i]);
+                break;
+            }
+        }
+        update_scale(state);
+    } else {
+        int new_page = state->current_page;
+        if ((key == SDLK_LEFT || key == SDLK_UP || key == SDLK_PAGEUP) &&
+            state->current_page > 0) {
+            new_page = state->current_page - 1;
+        } else if ((key == SDLK_RIGHT || key == SDLK_DOWN ||
+                    key == SDLK_PAGEDOWN) &&
+                   state->current_page < state->num_pages - 1) {
+            new_page = state->current_page + 1;
+        }
+        if (new_page != state->current_page) {
+            if (!state->cache_entries[new_page]) {
+                fprintf(stderr,
+                        "Warning: Page %d not cached; performing blocking "
+                        "render.\n",
+                        new_page);
+                state->cache_entries[new_page] =
+                    create_cache_entry(new_page, state);
+            }
+            state->current_page = new_page;
+            state->needs_redraw = 1;
+        }
+    }
 }
 
-static void handle_glfw_events(struct prog_state *state) {
-    for (int i = 0; i < state->num_ctx; i++) {
-        glfwSetKeyCallback(state->ctx[i].window, key_callback);
-        glfwSetFramebufferSizeCallback(state->ctx[i].window,
-                                       framebuffer_size_callback);
-        glfwSetWindowRefreshCallback(state->ctx[i].window,
-                                     window_refresh_callback);
-        glfwSetWindowUserPointer(state->ctx[i].window, state);
-    }
+static void handle_sdl_events(struct prog_state *state) {
+    state->cache_entries =
+        calloc(state->num_pages, sizeof(struct render_cache_entry *));
+    expect(state->cache_entries);
 
-    glfwMakeContextCurrent(state->ctx[0].window);
-
-    /* Render the first page (blocking render); others will be cached. */
+    // Render the first page blocking, we need it immediately.
     state->cache_entries[state->current_page] =
         create_cache_entry(state->current_page, state);
-    if (state->cache_entries[state->current_page]) {
+    if (state->cache_entries[state->current_page])
         update_window_textures(state);
-    }
 
-    while (!glfwWindowShouldClose(state->ctx[0].window)) {
-        if (cache_complete(state))
-            glfwWaitEvents();
-        else {
-            glfwPollEvents(); // If a key has been pressed, that takes priority
-            cache_one_slide(state->cache_entries, state->num_pages, state);
+    int running = 1;
+    while (running) {
+        if (cache_complete(state)) { // Otherwise go ahead to complete cache
+            SDL_WaitEvent(NULL);
         }
-        if (state->needs_redraw && state->cache_entries[state->current_page]) {
+
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = 0;
+                    break;
+
+                case SDL_KEYDOWN:
+                    key_handler(&event, state, &running);
+                    break;
+
+                case SDL_WINDOWEVENT:
+                    if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                        event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                        update_scale(state);
+                    } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED ||
+                               event.window.event == SDL_WINDOWEVENT_SHOWN ||
+                               event.window.event == SDL_WINDOWEVENT_RESTORED) {
+                        state->needs_redraw = 1;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        cache_one_slide(state->cache_entries, state->num_pages, state);
+
+        if (state->needs_redraw && state->cache_entries[state->current_page])
             update_window_textures(state);
-        }
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
     free(state->cache_entries);
@@ -454,31 +472,32 @@ int main(int argc, char *argv[]) {
     }
     const char *pdf_file = argv[1];
 
-    expect(glfwInit());
-    struct prog_state ps = {0};
-    if (init_prog_state(&ps, pdf_file) < 0)
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
+    expect(SDL_Init(SDL_INIT_VIDEO) == 0);
+
+    struct prog_state ps;
+    if (init_prog_state(&ps, pdf_file) < 0) {
+        SDL_Quit();
         return EXIT_FAILURE;
+    }
+
     ps.num_ctx = NUM_CONTEXTS;
-    ps.cache_entries =
-        calloc(ps.num_pages, sizeof(struct render_cache_entry *));
-    expect(ps.cache_entries);
-    ps.ctx = calloc(ps.num_ctx, sizeof(struct gl_ctx));
+    ps.ctx = calloc(ps.num_ctx, sizeof(struct sdl_ctx));
     expect(ps.ctx);
     create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
 
     ps.current_scale =
         compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
-    ps.needs_redraw = 1;
 
-    handle_glfw_events(&ps);
+    handle_sdl_events(&ps);
 
-    fz_drop_document(ps.fz_ctx, ps.document);
-    fz_drop_context(ps.fz_ctx);
-
+    g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
+        if (ps.ctx[i].renderer)
+            SDL_DestroyRenderer(ps.ctx[i].renderer);
         if (ps.ctx[i].window)
-            glfwDestroyWindow(ps.ctx[i].window);
+            SDL_DestroyWindow(ps.ctx[i].window);
     }
     free(ps.ctx);
-    glfwTerminate();
+    SDL_Quit();
 }
