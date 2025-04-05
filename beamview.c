@@ -476,10 +476,8 @@ int main(int argc, char *argv[]) {
 
     g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
-        if (ps.ctx[i].renderer)
-            SDL_DestroyRenderer(ps.ctx[i].renderer);
-        if (ps.ctx[i].window)
-            SDL_DestroyWindow(ps.ctx[i].window);
+        SDL_DestroyRenderer(ps.ctx[i].renderer);
+        SDL_DestroyWindow(ps.ctx[i].window);
     }
     free(ps.ctx);
     SDL_Quit();
