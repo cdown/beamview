@@ -82,8 +82,7 @@ static void toggle_fullscreen(struct sdl_ctx *ctx) {
 
 static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
                             int natural_width, int natural_height) {
-    if (!texture)
-        return;
+    expect(texture);
 
     int win_width, win_height;
     SDL_GetRendererOutputSize(renderer, &win_width, &win_height);
@@ -104,11 +103,7 @@ static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
 
 static double compute_scale(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
-    if (pdf_width <= 0 || pdf_height <= 0) {
-        fprintf(stderr, "Invalid PDF dimensions: width=%.2f, height=%.2f\n",
-                pdf_width, pdf_height);
-        return 1.0;
-    }
+    expect(pdf_width > 0 && pdf_height > 0);
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
@@ -154,20 +149,13 @@ static SDL_Surface *
 create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
                               int region_width, int img_height) {
     int cairo_width = cairo_image_surface_get_width(cairo_surface);
-    if (x_offset < 0 || region_width <= 0 ||
-        x_offset + region_width > cairo_width) {
-        fprintf(stderr,
-                "Requested region exceeds cairo surface bounds: x_offset=%d, "
-                "region_width=%d, cairo_width=%d\n",
-                x_offset, region_width, cairo_width);
-        return NULL;
-    }
+    expect(x_offset >= 0 && region_width > 0 &&
+           x_offset + region_width <= cairo_width);
 
     SDL_Surface *sdl_surface =
         SDL_CreateRGBSurface(0, region_width, img_height, 32, 0x00FF0000,
                              0x0000FF00, 0x000000FF, 0xFF000000);
-    if (!sdl_surface)
-        return NULL;
+    expect(sdl_surface);
 
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
@@ -183,8 +171,7 @@ create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
 }
 
 static void free_cache_entry(struct render_cache_entry *entry) {
-    if (!entry)
-        return;
+    expect(entry);
     for (int i = 0; i < NUM_CONTEXTS; i++) {
         if (entry->textures[i])
             SDL_DestroyTexture(entry->textures[i]);
