@@ -142,7 +142,7 @@ static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
     poppler_page_render(page, cr);
 
     cairo_pattern_t *pattern = cairo_get_source(cr);
-    cairo_pattern_set_filter(pattern, CAIRO_FILTER_BILINEAR);
+    cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
 
     cairo_surface_flush(surface);
     cairo_destroy(cr);
