@@ -67,11 +67,8 @@ struct prog_state {
 };
 
 static void toggle_fullscreen(struct sdl_ctx *ctx) {
-    if (ctx->is_fullscreen) {
-        SDL_SetWindowFullscreen(ctx->window, 0);
-    } else {
-        SDL_SetWindowFullscreen(ctx->window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-    }
+    SDL_SetWindowFullscreen(
+        ctx->window, ctx->is_fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
     ctx->is_fullscreen = !ctx->is_fullscreen;
 }
 
