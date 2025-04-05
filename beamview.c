@@ -59,11 +59,12 @@ struct sdl_ctx {
 struct render_cache_entry {
     SDL_Texture *textures[NUM_CONTEXTS];
     int page_index, widths[NUM_CONTEXTS], texture_height;
+    double page_width, page_height;
 };
 
 struct prog_state {
     struct sdl_ctx *ctx;
-    double pdf_width, pdf_height, current_scale;
+    double init_pdf_width, init_pdf_height, current_scale;
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, next_cache_index, needs_redraw;
     struct render_cache_entry **cache_entries;
@@ -96,28 +97,27 @@ static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
     SDL_RenderPresent(renderer);
 }
 
-static double compute_scale(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
-                            double pdf_height) {
-    expect(pdf_width > 0 && pdf_height > 0);
+static double compute_scale(struct sdl_ctx ctx[], int num_ctx,
+                            double page_width, double page_height) {
+    expect(page_width > 0 && page_height > 0);
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
         SDL_GetWindowSize(ctx[i].window, &win_width, &win_height);
-        double scale_i = fmax((double)win_width / (pdf_width / num_ctx),
-                              (double)win_height / pdf_height);
+        double scale_i = fmax((double)win_width / (page_width / num_ctx),
+                              (double)win_height / page_height);
         scale = fmax(scale, scale_i);
     }
     return scale;
 }
 
-static cairo_surface_t *render_page_to_cairo_surface(PopplerPage *page,
-                                                     double scale,
-                                                     int *img_width,
-                                                     int *img_height) {
-    double page_width, page_height;
-    poppler_page_get_size(page, &page_width, &page_height);
-    *img_width = (int)(page_width * scale);
-    *img_height = (int)(page_height * scale);
+static cairo_surface_t *
+render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
+                             int *img_height, double *page_width,
+                             double *page_height) {
+    poppler_page_get_size(page, page_width, page_height);
+    *img_width = (int)(*page_width * scale);
+    *img_height = (int)(*page_height * scale);
 
     cairo_surface_t *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
@@ -182,16 +182,19 @@ static struct render_cache_entry *create_cache_entry(int page_index,
     }
 
     int img_width, img_height;
+    double page_width, page_height;
     _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
         render_page_to_cairo_surface(page, state->current_scale, &img_width,
-                                     &img_height);
+                                     &img_height, &page_width, &page_height);
 
     struct render_cache_entry *entry = calloc(1, sizeof(*entry));
     expect(entry);
     entry->page_index = page_index;
+    entry->page_width = page_width;
+    entry->page_height = page_height;
+    entry->texture_height = img_height;
 
     int base_split = img_width / state->num_ctx;
-    entry->texture_height = img_height;
 
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
@@ -273,8 +276,8 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
         g_object_unref(state->document);
         return -ENOENT;
     }
-    poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
-
+    poppler_page_get_size(first_page, &state->init_pdf_width,
+                          &state->init_pdf_height);
     state->current_scale = 1.0;
 
     return 0;
@@ -326,8 +329,17 @@ static void create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
 }
 
 static void update_scale(struct prog_state *state) {
-    double new_scale = compute_scale(state->ctx, state->num_ctx,
-                                     state->pdf_width, state->pdf_height);
+    double page_width, page_height;
+    if (state->cache_entries[state->current_page]) {
+        page_width = state->cache_entries[state->current_page]->page_width;
+        page_height = state->cache_entries[state->current_page]->page_height;
+    } else {
+        _drop_(g_object_unref) PopplerPage *page =
+            poppler_document_get_page(state->document, state->current_page);
+        poppler_page_get_size(page, &page_width, &page_height);
+    }
+    double new_scale =
+        compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     if (fabs(new_scale - state->current_scale) > 0.01) {
         state->current_scale = new_scale;
         fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
@@ -463,10 +475,10 @@ int main(int argc, char *argv[]) {
     ps.num_ctx = NUM_CONTEXTS;
     ps.ctx = calloc(ps.num_ctx, sizeof(struct sdl_ctx));
     expect(ps.ctx);
-    create_contexts(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
+    create_contexts(ps.ctx, ps.num_ctx, ps.init_pdf_width, ps.init_pdf_height);
 
-    ps.current_scale =
-        compute_scale(ps.ctx, ps.num_ctx, ps.pdf_width, ps.pdf_height);
+    ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.init_pdf_width,
+                                     ps.init_pdf_height);
 
     handle_sdl_events(&ps);
 
