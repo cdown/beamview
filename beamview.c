@@ -195,9 +195,8 @@ static struct render_cache_entry *create_cache_entry(int page_index,
 
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
-        int region_width = (i == state->num_ctx - 1)
-                               ? (img_width - base_split * i)
-                               : base_split;
+        int region_width =
+            (i == state->num_ctx - 1) ? (img_width - offset) : base_split;
 
         _drop_(SDL_FreeSurface) SDL_Surface *surface =
             create_sdl_surface_from_cairo(cairo_surface, offset, region_width,
