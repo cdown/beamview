@@ -312,16 +312,23 @@ static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
     return renderer;
 }
 
-static void create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
-                            double pdf_height) {
-    int base = (int)pdf_width / num_ctx;
+static void create_contexts(struct sdl_ctx ctx[], int num_ctx) {
+    SDL_Rect display_bounds;
+    expect(SDL_GetDisplayBounds(0, &display_bounds) == 0);
+    const int win_width = 1280;
+    const int win_height = 720;
+    int center_x = display_bounds.x + (display_bounds.w - win_width) / 2;
+    int center_y = display_bounds.y + (display_bounds.h - win_height) / 2;
+    const int offset = 100;
+
     for (int i = 0; i < num_ctx; i++) {
-        int width = (i == num_ctx - 1) ? (int)pdf_width - base * i : base;
         char title[32];
-        snprintf(title, sizeof(title), "Context %d", i);
-        ctx[i].window = SDL_CreateWindow(
-            title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
-            (int)pdf_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        snprintf(title, sizeof(title), "beamview: Context %d", i);
+        int x = center_x + i * offset;
+        int y = center_y + i * offset;
+        ctx[i].window =
+            SDL_CreateWindow(title, x, y, win_width, win_height,
+                             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
         expect(ctx[i].window);
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
@@ -475,7 +482,7 @@ int main(int argc, char *argv[]) {
     ps.num_ctx = NUM_CONTEXTS;
     ps.ctx = calloc(ps.num_ctx, sizeof(struct sdl_ctx));
     expect(ps.ctx);
-    create_contexts(ps.ctx, ps.num_ctx, ps.init_pdf_width, ps.init_pdf_height);
+    create_contexts(ps.ctx, ps.num_ctx);
 
     ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.init_pdf_width,
                                      ps.init_pdf_height);
