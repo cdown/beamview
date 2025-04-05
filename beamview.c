@@ -176,10 +176,7 @@ static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
-    if (!page) {
-        fprintf(stderr, "Failed to get page %d\n", page_index);
-        return NULL;
-    }
+    expect(page);
 
     int img_width, img_height;
     double page_width, page_height;
@@ -418,8 +415,7 @@ static void handle_sdl_events(struct prog_state *state) {
     // Render the first page blocking, we need it immediately.
     state->cache_entries[state->current_page] =
         create_cache_entry(state->current_page, state);
-    if (state->cache_entries[state->current_page])
-        update_window_textures(state);
+    update_window_textures(state);
 
     int running = 1;
     while (running) {
@@ -454,10 +450,11 @@ static void handle_sdl_events(struct prog_state *state) {
             }
         }
 
-        cache_one_slide(state->cache_entries, state->num_pages, state);
-
-        if (state->needs_redraw && state->cache_entries[state->current_page])
+        if (state->needs_redraw) {
             update_window_textures(state);
+        } else {
+            cache_one_slide(state->cache_entries, state->num_pages, state);
+        }
     }
     free_all_cache_entries(state->cache_entries, state->num_pages);
     free(state->cache_entries);
