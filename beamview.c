@@ -264,7 +264,6 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     if (num_pages <= 0) {
         fprintf(stderr, "PDF has no pages.\n");
         g_object_unref(state->document);
-        state->document = NULL;
         return -EINVAL;
     }
     state->num_pages = num_pages;
@@ -274,7 +273,6 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     if (!first_page) {
         fprintf(stderr, "Failed to load first page.\n");
         g_object_unref(state->document);
-        state->document = NULL;
         return -ENOENT;
     }
     poppler_page_get_size(first_page, &state->pdf_width, &state->pdf_height);
