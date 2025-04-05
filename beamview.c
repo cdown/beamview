@@ -30,6 +30,8 @@ DEFINE_DROP_FUNC(SDL_Surface *, SDL_FreeSurface)
 DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
 DEFINE_DROP_FUNC(cairo_t *, cairo_destroy)
 DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
+DEFINE_DROP_FUNC_COERCE(gpointer, g_free)
+DEFINE_DROP_FUNC(GError *, g_error_free)
 
 #define expect(x)                                                              \
     do {                                                                       \
@@ -248,14 +250,12 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
         perror("realpath");
         return -errno;
     }
-    char *uri = g_strdup_printf("file://%s", resolved_path);
-    GError *error = NULL;
+    _drop_(g_free) char *uri = g_strdup_printf("file://%s", resolved_path);
+    _drop_(g_error_free) GError *error = NULL;
     state->document = poppler_document_new_from_file(uri, NULL, &error);
-    g_free(uri);
 
     if (!state->document) {
         fprintf(stderr, "Error opening PDF: %s\n", error->message);
-        g_error_free(error);
         return -EIO;
     }
 
