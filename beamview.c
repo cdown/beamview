@@ -145,21 +145,15 @@ create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
     expect(x_offset >= 0 && region_width > 0 &&
            x_offset + region_width <= cairo_width);
 
-    SDL_Surface *sdl_surface =
-        SDL_CreateRGBSurface(0, region_width, img_height, 32, 0x00FF0000,
-                             0x0000FF00, 0x000000FF, 0xFF000000);
-    expect(sdl_surface);
-
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
     expect(cairo_data);
 
-    for (int y = 0; y < img_height; y++) {
-        unsigned char *src_row = cairo_data + y * cairo_stride + x_offset * 4;
-        unsigned char *dst_row =
-            (unsigned char *)sdl_surface->pixels + y * sdl_surface->pitch;
-        memcpy(dst_row, src_row, region_width * 4);
-    }
+    unsigned char *region_data = cairo_data + x_offset * 4;
+    SDL_Surface *sdl_surface = SDL_CreateRGBSurfaceWithFormatFrom(
+        region_data, region_width, img_height, 32, cairo_stride,
+        SDL_PIXELFORMAT_ARGB8888);
+    expect(sdl_surface);
     return sdl_surface;
 }
 
