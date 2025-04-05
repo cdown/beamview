@@ -1,5 +1,5 @@
-CFLAGS = -Wall -Wextra -pedantic -O2 `pkg-config --cflags sdl2 poppler-glib cairo`
-LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm
+CFLAGS = -Wall -Wextra -pedantic -O2 `pkg-config --cflags sdl2 poppler-glib cairo` -I/usr/X11R6/include -L/usr/X11R6/lib
+LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm -lX11
 
 all: beamview
 

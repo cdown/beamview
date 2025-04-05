@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <X11/Xlib.h>
 #include <cairo.h>
 #include <errno.h>
 #include <glib.h>
@@ -286,6 +287,35 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     return 0;
 }
 
+static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
+    (void)dpy;
+    (void)event;
+    return 0;
+}
+
+static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
+    static int use_software_only = 0;
+    if (use_software_only) {
+        // We already know hardware accel fails, use software right away.
+        return SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+
+    // We need this to avoid a BadValue crash by default
+    int (*old_handler)(Display *, XErrorEvent *) =
+        XSetErrorHandler(accel_x11_error_handler);
+    SDL_Renderer *renderer = SDL_CreateRenderer(
+        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    XSetErrorHandler(old_handler);
+    if (!renderer) {
+        fprintf(
+            stderr,
+            "Warning: hardware acceleration seems unavailable, using software rendering\n");
+        use_software_only = 1;
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+    return renderer;
+}
+
 static void create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
                             double pdf_height) {
     int base = (int)pdf_width / num_ctx;
@@ -297,10 +327,7 @@ static void create_contexts(struct sdl_ctx ctx[], int num_ctx, double pdf_width,
             title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
             (int)pdf_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
         expect(ctx[i].window);
-
-        ctx[i].renderer = SDL_CreateRenderer(ctx[i].window, -1,
-                                             SDL_RENDERER_ACCELERATED |
-                                                 SDL_RENDERER_PRESENTVSYNC);
+        ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
     }
 }
