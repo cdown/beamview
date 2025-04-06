@@ -57,8 +57,8 @@ struct sdl_ctx {
 };
 
 struct render_cache_entry {
-    SDL_Texture *textures[NUM_CONTEXTS];
-    int page_index, widths[NUM_CONTEXTS], texture_height;
+    cairo_surface_t *cairo_surface;
+    int img_width, img_height;
     double page_width, page_height;
 };
 
@@ -138,31 +138,9 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     return surface;
 }
 
-static SDL_Texture *
-create_sdl_texture_from_cairo(SDL_Renderer *renderer,
-                              cairo_surface_t *cairo_surface, int x_offset,
-                              int region_width, int img_height) {
-    SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
-    int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
-    int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
-    unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
-    expect(cairo_data);
-    unsigned char *region_data = cairo_data + x_offset * bytes_per_pixel;
-    // TODO: Store this per-context and just call SDL_UpdateTexture?
-    SDL_Texture *texture =
-        SDL_CreateTexture(renderer, pixel_fmt, SDL_TEXTUREACCESS_STATIC,
-                          region_width, img_height);
-    expect(texture);
-    expect(SDL_UpdateTexture(texture, NULL, region_data, cairo_stride) == 0);
-    return texture;
-}
-
 static void free_cache_entry(struct render_cache_entry *entry) {
     expect(entry);
-    for (int i = 0; i < NUM_CONTEXTS; i++) {
-        if (entry->textures[i])
-            SDL_DestroyTexture(entry->textures[i]);
-    }
+    cairo_surface_destroy(entry->cairo_surface);
     free(entry);
 }
 
@@ -177,29 +155,17 @@ static struct render_cache_entry *create_cache_entry(int page_index,
 
     int img_width, img_height;
     double page_width, page_height;
-    _drop_(cairo_surface_destroy) cairo_surface_t *cairo_surface =
+    cairo_surface_t *cairo_surface =
         render_page_to_cairo_surface(page, state->current_scale, &img_width,
                                      &img_height, &page_width, &page_height);
 
     struct render_cache_entry *entry = calloc(1, sizeof(*entry));
     expect(entry);
-    entry->page_index = page_index;
     entry->page_width = page_width;
     entry->page_height = page_height;
-    entry->texture_height = img_height;
-
-    int base_split = img_width / state->num_ctx;
-
-    for (int i = 0; i < state->num_ctx; i++) {
-        int offset = i * base_split;
-        int region_width =
-            (i == state->num_ctx - 1) ? (img_width - offset) : base_split;
-        entry->widths[i] = region_width;
-        entry->textures[i] =
-            create_sdl_texture_from_cairo(state->ctx[i].renderer, cairo_surface,
-                                          offset, region_width, img_height);
-        expect(entry->textures[i]);
-    }
+    entry->img_width = img_width;
+    entry->img_height = img_height;
+    entry->cairo_surface = cairo_surface;
 
     clock_gettime(CLOCK_MONOTONIC, &end);
     double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
@@ -357,9 +323,37 @@ static void update_window_textures(struct prog_state *state) {
     struct render_cache_entry *entry =
         state->cache_entries[state->current_page];
     expect(entry);
+    int base_split = entry->img_width / state->num_ctx;
     for (int i = 0; i < state->num_ctx; i++) {
-        present_texture(state->ctx[i].renderer, entry->textures[i],
-                        entry->widths[i], entry->texture_height);
+        int offset = i * base_split;
+        int region_width = (i == state->num_ctx - 1)
+                               ? (entry->img_width - offset)
+                               : base_split;
+        SDL_Renderer *renderer = state->ctx[i].renderer;
+        struct texture_data *texdata = &state->ctx[i].texture;
+        SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
+        if (texdata->texture == NULL ||
+            texdata->natural_width != region_width ||
+            texdata->natural_height != entry->img_height) {
+            if (texdata->texture)
+                SDL_DestroyTexture(texdata->texture);
+            texdata->texture = SDL_CreateTexture(
+                renderer, pixel_fmt, SDL_TEXTUREACCESS_STREAMING, region_width,
+                entry->img_height);
+            expect(texdata->texture);
+            texdata->natural_width = region_width;
+            texdata->natural_height = entry->img_height;
+        }
+        int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
+        int cairo_stride = cairo_image_surface_get_stride(entry->cairo_surface);
+        unsigned char *cairo_data =
+            cairo_image_surface_get_data(entry->cairo_surface);
+        expect(cairo_data);
+        unsigned char *region_data = cairo_data + offset * bytes_per_pixel;
+        expect(SDL_UpdateTexture(texdata->texture, NULL, region_data,
+                                 cairo_stride) == 0);
+        present_texture(renderer, texdata->texture, region_width,
+                        entry->img_height);
     }
     state->needs_redraw = 0;
 }
@@ -486,6 +480,7 @@ int main(int argc, char *argv[]) {
     free(ps.cache_entries);
     g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
+        SDL_DestroyTexture(ps.ctx[i].texture.texture);
         SDL_DestroyRenderer(ps.ctx[i].renderer);
         SDL_DestroyWindow(ps.ctx[i].window);
     }
