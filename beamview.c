@@ -450,8 +450,6 @@ static void handle_sdl_events(struct prog_state *state) {
             cache_one_slide(state->cache_entries, state->num_pages, state);
         }
     }
-    free_all_cache_entries(state->cache_entries, state->num_pages);
-    free(state->cache_entries);
 }
 
 int main(int argc, char *argv[]) {
@@ -480,6 +478,8 @@ int main(int argc, char *argv[]) {
 
     handle_sdl_events(&ps);
 
+    free_all_cache_entries(ps.cache_entries, ps.num_pages);
+    free(ps.cache_entries);
     g_object_unref(ps.document);
     for (int i = 0; i < ps.num_ctx; i++) {
         SDL_DestroyRenderer(ps.ctx[i].renderer);
