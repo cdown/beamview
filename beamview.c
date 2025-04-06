@@ -153,7 +153,8 @@ create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
     unsigned char *region_data =
         cairo_data + x_offset * SDL_BYTESPERPIXEL(pixel_fmt);
     SDL_Surface *sdl_surface = SDL_CreateRGBSurfaceWithFormatFrom(
-        region_data, region_width, img_height, 32, cairo_stride, pixel_fmt);
+        region_data, region_width, img_height, SDL_BITSPERPIXEL(pixel_fmt),
+        cairo_stride, pixel_fmt);
     expect(sdl_surface);
     return sdl_surface;
 }
