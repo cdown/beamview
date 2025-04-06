@@ -26,7 +26,6 @@
         }                                                                      \
     }
 
-DEFINE_DROP_FUNC(SDL_Surface *, SDL_FreeSurface)
 DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
 DEFINE_DROP_FUNC(cairo_t *, cairo_destroy)
 DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
@@ -138,25 +137,23 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     return surface;
 }
 
-static SDL_Surface *
-create_sdl_surface_from_cairo(cairo_surface_t *cairo_surface, int x_offset,
+static SDL_Texture *
+create_sdl_texture_from_cairo(SDL_Renderer *renderer,
+                              cairo_surface_t *cairo_surface, int x_offset,
                               int region_width, int img_height) {
-    int cairo_width = cairo_image_surface_get_width(cairo_surface);
-    expect(x_offset >= 0 && region_width > 0 &&
-           x_offset + region_width <= cairo_width);
-
+    SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
+    int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
     int cairo_stride = cairo_image_surface_get_stride(cairo_surface);
     unsigned char *cairo_data = cairo_image_surface_get_data(cairo_surface);
     expect(cairo_data);
-
-    SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
-    unsigned char *region_data =
-        cairo_data + x_offset * SDL_BYTESPERPIXEL(pixel_fmt);
-    SDL_Surface *sdl_surface = SDL_CreateRGBSurfaceWithFormatFrom(
-        region_data, region_width, img_height, SDL_BITSPERPIXEL(pixel_fmt),
-        cairo_stride, pixel_fmt);
-    expect(sdl_surface);
-    return sdl_surface;
+    unsigned char *region_data = cairo_data + x_offset * bytes_per_pixel;
+    // TODO: Store this per-context and just call SDL_UpdateTexture?
+    SDL_Texture *texture =
+        SDL_CreateTexture(renderer, pixel_fmt, SDL_TEXTUREACCESS_STATIC,
+                          region_width, img_height);
+    expect(texture);
+    expect(SDL_UpdateTexture(texture, NULL, region_data, cairo_stride) == 0);
+    return texture;
 }
 
 static void free_cache_entry(struct render_cache_entry *entry) {
@@ -193,15 +190,10 @@ static struct render_cache_entry *create_cache_entry(int page_index,
         int offset = i * base_split;
         int region_width =
             (i == state->num_ctx - 1) ? (img_width - offset) : base_split;
-
-        _drop_(SDL_FreeSurface) SDL_Surface *surface =
-            create_sdl_surface_from_cairo(cairo_surface, offset, region_width,
-                                          img_height);
-        expect(surface);
-
         entry->widths[i] = region_width;
         entry->textures[i] =
-            SDL_CreateTextureFromSurface(state->ctx[i].renderer, surface);
+            create_sdl_texture_from_cairo(state->ctx[i].renderer, cairo_surface,
+                                          offset, region_width, img_height);
         expect(entry->textures[i]);
     }
 
