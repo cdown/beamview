@@ -402,15 +402,6 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
 }
 
 static void handle_sdl_events(struct prog_state *state) {
-    state->cache_entries =
-        calloc(state->num_pages, sizeof(struct render_cache_entry *));
-    expect(state->cache_entries);
-
-    // Render the first page blocking, we need it immediately.
-    state->cache_entries[state->current_page] =
-        create_cache_entry(state->current_page, state);
-    update_window_textures(state);
-
     int running = 1;
     while (running) {
         if (cache_complete(state)) { // Otherwise go ahead to complete cache
@@ -475,6 +466,15 @@ int main(int argc, char *argv[]) {
 
     ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.init_pdf_width,
                                      ps.init_pdf_height);
+
+    ps.cache_entries =
+        calloc(ps.num_pages, sizeof(struct render_cache_entry *));
+    expect(ps.cache_entries);
+
+    // Render the first page blocking, we need it immediately.
+    ps.cache_entries[ps.current_page] =
+        create_cache_entry(ps.current_page, &ps);
+    update_window_textures(&ps);
 
     handle_sdl_events(&ps);
 
