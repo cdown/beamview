@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
@@ -167,6 +168,9 @@ static void free_cache_entry(struct render_cache_entry *entry) {
 
 static struct render_cache_entry *create_cache_entry(int page_index,
                                                      struct prog_state *state) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     expect(page);
@@ -197,7 +201,13 @@ static struct render_cache_entry *create_cache_entry(int page_index,
         expect(entry->textures[i]);
     }
 
-    fprintf(stderr, "Cache page %d created.\n", page_index);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                            (end.tv_nsec - start.tv_nsec) / 1000000.0;
+
+    fprintf(stderr,
+            "Cache page %d created in %.2f ms. Rendered size: %d x %d\n",
+            page_index, render_time_ms, img_width, img_height);
     return entry;
 }
 
