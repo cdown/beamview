@@ -242,6 +242,7 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
     poppler_page_get_size(first_page, &state->init_pdf_width,
                           &state->init_pdf_height);
     state->current_scale = 1.0;
+    state->needs_redraw = 1;
 
     return 0;
 }
@@ -412,7 +413,7 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
 static void handle_sdl_events(struct prog_state *state) {
     int running = 1;
     while (running) {
-        if (cache_complete(state)) {
+        if (!state->needs_redraw && cache_complete(state)) {
             if (!state->caching_complete_reported) {
                 struct timespec now;
                 clock_gettime(CLOCK_MONOTONIC, &now);
@@ -494,7 +495,6 @@ int main(int argc, char *argv[]) {
     // Render the first page blocking, we need it immediately.
     ps.cache_entries[ps.current_page] =
         create_cache_entry(ps.current_page, &ps);
-    update_window_textures(&ps);
 
     handle_sdl_events(&ps);
 
