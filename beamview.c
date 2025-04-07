@@ -68,6 +68,8 @@ struct prog_state {
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, next_cache_index, needs_redraw;
     struct render_cache_entry **cache_entries;
+    struct timespec caching_start_time;
+    int caching_complete_reported;
 };
 
 static void toggle_fullscreen(struct sdl_ctx *ctx) {
@@ -402,7 +404,17 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
 static void handle_sdl_events(struct prog_state *state) {
     int running = 1;
     while (running) {
-        if (cache_complete(state)) { // Otherwise go ahead to complete cache
+        if (cache_complete(state)) {
+            if (!state->caching_complete_reported) {
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                double cache_time_ms =
+                    (now.tv_sec - state->caching_start_time.tv_sec) * 1000.0 +
+                    (now.tv_nsec - state->caching_start_time.tv_nsec) /
+                        1000000.0;
+                fprintf(stderr, "Caching complete in %.2f ms\n", cache_time_ms);
+                state->caching_complete_reported = 1;
+            }
             SDL_WaitEvent(NULL);
         }
 
@@ -468,6 +480,8 @@ int main(int argc, char *argv[]) {
     ps.cache_entries =
         calloc(ps.num_pages, sizeof(struct render_cache_entry *));
     expect(ps.cache_entries);
+
+    clock_gettime(CLOCK_MONOTONIC, &ps.caching_start_time);
 
     // Render the first page blocking, we need it immediately.
     ps.cache_entries[ps.current_page] =
