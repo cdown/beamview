@@ -322,6 +322,9 @@ static void update_scale(struct prog_state *state) {
 }
 
 static void update_window_textures(struct prog_state *state) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     struct render_cache_entry *entry =
         state->cache_entries[state->current_page];
     expect(entry);
@@ -357,6 +360,11 @@ static void update_window_textures(struct prog_state *state) {
         present_texture(renderer, texdata->texture, region_width,
                         entry->img_height);
     }
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
+                            (end.tv_nsec - start.tv_nsec) / 1000000.0;
+    fprintf(stderr, "Rendered page %d in %.2f ms\n", state->current_page,
+            render_time_ms);
     state->needs_redraw = 0;
 }
 
