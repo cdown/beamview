@@ -257,15 +257,8 @@ static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
 }
 
 static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
-    static int use_software_only = 0;
-    if (use_software_only) {
-        // We already know hardware accel fails, use software right away.
-        return SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
-
-    // We need this to avoid a BadValue crash by default
     int (*old_handler)(Display *, XErrorEvent *) =
-        XSetErrorHandler(accel_x11_error_handler);
+        XSetErrorHandler(accel_x11_error_handler); // Avoid BadValue crash
     SDL_Renderer *renderer = SDL_CreateRenderer(
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     XSetErrorHandler(old_handler);
@@ -273,7 +266,6 @@ static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
         fprintf(
             stderr,
             "Warning: hardware acceleration seems unavailable, using software rendering\n");
-        use_software_only = 1;
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     }
     return renderer;
