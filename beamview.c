@@ -43,6 +43,8 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
     } while (0)
 
 #define NUM_CONTEXTS 2
+#define PAGE_NUMBER_INVALID ((int)-1)
+#define CACHE_SIZE 3
 
 struct texture_data {
     SDL_Texture *texture;
@@ -60,17 +62,35 @@ struct render_cache_entry {
     cairo_surface_t *cairo_surface;
     int img_width, img_height;
     double page_width, page_height;
+    int page_number;
 };
+
+struct page_cache {
+    struct render_cache_entry entries[CACHE_SIZE];
+    int complete;
+};
+
+static struct render_cache_entry *cache_slot(struct page_cache *cache,
+                                             int page) {
+    return &cache->entries[page % CACHE_SIZE];
+}
 
 struct prog_state {
     struct sdl_ctx *ctx;
     double init_pdf_width, init_pdf_height, current_scale;
     PopplerDocument *document;
-    int num_ctx, current_page, num_pages, next_cache_index, needs_redraw;
-    struct render_cache_entry **cache_entries;
-    struct timespec caching_start_time;
-    int caching_complete_reported;
+    int num_ctx, current_page, num_pages, needs_redraw;
+    struct page_cache page_cache;
 };
+
+static void update_cache_status(struct prog_state *state) {
+    int curr = state->current_page;
+    state->page_cache.complete =
+        ((curr == 0) ||
+         (cache_slot(&state->page_cache, curr - 1)->page_number == curr - 1)) &&
+        ((curr == state->num_pages - 1) ||
+         (cache_slot(&state->page_cache, curr + 1)->page_number == curr + 1));
+}
 
 static void toggle_fullscreen(struct sdl_ctx *ctx) {
     SDL_SetWindowFullscreen(
@@ -139,71 +159,63 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     return surface;
 }
 
-static void free_cache_entry(struct render_cache_entry *entry) {
-    expect(entry);
-    cairo_surface_destroy(entry->cairo_surface);
-    free(entry);
+static void invalidate_cache_slot(struct render_cache_entry *slot) {
+    if (slot->cairo_surface)
+        cairo_surface_destroy(slot->cairo_surface);
+    memset(slot, 0, sizeof(*slot));
+    slot->page_number = PAGE_NUMBER_INVALID;
 }
 
-static struct render_cache_entry *create_cache_entry(int page_index,
-                                                     struct prog_state *state) {
+enum cache_result {
+    CACHE_UPDATED,
+    CACHE_REUSED,
+};
+
+static enum cache_result page_cache_update(struct prog_state *state,
+                                           int page_index) {
+    struct render_cache_entry *slot =
+        cache_slot(&state->page_cache, page_index);
+    if (slot->page_number == page_index)
+        return CACHE_REUSED;
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
-
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     expect(page);
-
     int img_width, img_height;
     double page_width, page_height;
-    cairo_surface_t *cairo_surface =
+    invalidate_cache_slot(slot);
+    slot->cairo_surface =
         render_page_to_cairo_surface(page, state->current_scale, &img_width,
                                      &img_height, &page_width, &page_height);
-
-    struct render_cache_entry *entry = calloc(1, sizeof(*entry));
-    expect(entry);
-    entry->page_width = page_width;
-    entry->page_height = page_height;
-    entry->img_width = img_width;
-    entry->img_height = img_height;
-    entry->cairo_surface = cairo_surface;
-
+    slot->img_width = img_width;
+    slot->img_height = img_height;
+    slot->page_width = page_width;
+    slot->page_height = page_height;
+    slot->page_number = page_index;
     clock_gettime(CLOCK_MONOTONIC, &end);
     double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
                             (end.tv_nsec - start.tv_nsec) / 1000000.0;
-
     fprintf(stderr,
             "Cache page %d created in %.2f ms. Rendered size: %d x %d\n",
             page_index, render_time_ms, img_width, img_height);
-    return entry;
+    update_cache_status(state);
+    return CACHE_UPDATED;
 }
 
-static void free_all_cache_entries(struct render_cache_entry **cache_entries,
-                                   int num_pages) {
-    for (int i = 0; i < num_pages; i++) {
-        if (cache_entries[i]) {
-            free_cache_entry(cache_entries[i]);
-            cache_entries[i] = NULL;
-        }
+static void free_page_cache(struct page_cache *cache) {
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        invalidate_cache_slot(&cache->entries[i]);
     }
 }
 
-static int cache_complete(struct prog_state *state) {
-    return state->next_cache_index == state->num_pages;
-}
-
-static void cache_one_slide(struct render_cache_entry **cache_entries,
-                            int num_pages, struct prog_state *state) {
-    if (cache_complete(state))
+static void idle_update_cache(struct prog_state *state) {
+    if (state->page_cache.complete)
         return;
-
-    int i = state->next_cache_index;
-    while (i < num_pages && cache_entries[i])
-        i++;
-    if (i < num_pages) {
-        cache_entries[i] = create_cache_entry(i, state);
-        state->next_cache_index = i + 1;
-    }
+    if (state->current_page > 0)
+        page_cache_update(state, state->current_page - 1);
+    if (state->current_page < state->num_pages - 1)
+        page_cache_update(state, state->current_page + 1);
 }
 
 static int init_prog_state(struct prog_state *state, const char *pdf_file) {
@@ -242,7 +254,10 @@ static int init_prog_state(struct prog_state *state, const char *pdf_file) {
                           &state->init_pdf_height);
     state->current_scale = 1.0;
     state->needs_redraw = 1;
-
+    memset(&state->page_cache, 0, sizeof(state->page_cache));
+    for (int i = 0; i < CACHE_SIZE; i++)
+        state->page_cache.entries[i].page_number = PAGE_NUMBER_INVALID;
+    page_cache_update(state, state->current_page);
     return 0;
 }
 
@@ -300,34 +315,32 @@ static void create_contexts(struct sdl_ctx ctx[], int num_ctx) {
 
 static void update_scale(struct prog_state *state) {
     double page_width, page_height;
-    if (state->cache_entries[state->current_page]) {
-        page_width = state->cache_entries[state->current_page]->page_width;
-        page_height = state->cache_entries[state->current_page]->page_height;
+    struct render_cache_entry *entry =
+        cache_slot(&state->page_cache, state->current_page);
+    if (entry->page_number == state->current_page) {
+        page_width = entry->page_width;
+        page_height = entry->page_height;
     } else {
         _drop_(g_object_unref) PopplerPage *page =
             poppler_document_get_page(state->document, state->current_page);
         poppler_page_get_size(page, &page_width, &page_height);
     }
-    double new_scale =
+    state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
-    if (fabs(new_scale - state->current_scale) > 0.01) {
-        state->current_scale = new_scale;
-        fprintf(stderr, "Window resized, new scale: %.2f\n", new_scale);
-        free_all_cache_entries(state->cache_entries, state->num_pages);
-        state->next_cache_index = 0;
-        state->cache_entries[state->current_page] =
-            create_cache_entry(state->current_page, state);
-        state->needs_redraw = 1;
+    fprintf(stderr, "Window resized, new scale: %.2f\n", state->current_scale);
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        invalidate_cache_slot(&state->page_cache.entries[i]);
     }
+    page_cache_update(state, state->current_page);
+    state->needs_redraw = 1;
 }
 
 static void update_window_textures(struct prog_state *state) {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
-
     struct render_cache_entry *entry =
-        state->cache_entries[state->current_page];
-    expect(entry);
+        cache_slot(&state->page_cache, state->current_page);
+    expect(entry->cairo_surface);
     int base_split = entry->img_width / state->num_ctx;
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
@@ -395,15 +408,14 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
             new_page = state->current_page + 1;
         }
         if (new_page != state->current_page) {
-            if (!state->cache_entries[new_page]) {
-                fprintf(stderr,
-                        "Warning: Page %d not cached; performing blocking "
-                        "render.\n",
-                        new_page);
-                state->cache_entries[new_page] =
-                    create_cache_entry(new_page, state);
+            if (page_cache_update(state, new_page) == CACHE_UPDATED) {
+                fprintf(
+                    stderr,
+                    "Warning: Page %d uncached, performed blocking render.\n",
+                    new_page);
             }
             state->current_page = new_page;
+            update_cache_status(state);
             state->needs_redraw = 1;
         }
     }
@@ -412,17 +424,7 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
 static void handle_sdl_events(struct prog_state *state) {
     int running = 1;
     while (running) {
-        if (!state->needs_redraw && cache_complete(state)) {
-            if (!state->caching_complete_reported) {
-                struct timespec now;
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                double cache_time_ms =
-                    (now.tv_sec - state->caching_start_time.tv_sec) * 1000.0 +
-                    (now.tv_nsec - state->caching_start_time.tv_nsec) /
-                        1000000.0;
-                fprintf(stderr, "Caching complete in %.2f ms\n", cache_time_ms);
-                state->caching_complete_reported = 1;
-            }
+        if (!state->needs_redraw && state->page_cache.complete) {
             SDL_WaitEvent(NULL);
         }
 
@@ -456,7 +458,7 @@ static void handle_sdl_events(struct prog_state *state) {
         if (state->needs_redraw) {
             update_window_textures(state);
         } else {
-            cache_one_slide(state->cache_entries, state->num_pages, state);
+            idle_update_cache(state);
         }
     }
 }
@@ -484,27 +486,14 @@ int main(int argc, char *argv[]) {
 
     ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.init_pdf_width,
                                      ps.init_pdf_height);
-
-    ps.cache_entries =
-        calloc(ps.num_pages, sizeof(struct render_cache_entry *));
-    expect(ps.cache_entries);
-
-    clock_gettime(CLOCK_MONOTONIC, &ps.caching_start_time);
-
-    // Render the first page blocking, we need it immediately.
-    ps.cache_entries[ps.current_page] =
-        create_cache_entry(ps.current_page, &ps);
-
     handle_sdl_events(&ps);
-
-    free_all_cache_entries(ps.cache_entries, ps.num_pages);
-    free(ps.cache_entries);
-    g_object_unref(ps.document);
+    free_page_cache(&ps.page_cache);
     for (int i = 0; i < ps.num_ctx; i++) {
         SDL_DestroyTexture(ps.ctx[i].texture.texture);
         SDL_DestroyRenderer(ps.ctx[i].renderer);
         SDL_DestroyWindow(ps.ctx[i].window);
     }
     free(ps.ctx);
+    g_object_unref(ps.document);
     SDL_Quit();
 }
