@@ -415,11 +415,9 @@ static void handle_sdl_events(struct bv_prog_state *state) {
                 case SDL_QUIT:
                     running = 0;
                     break;
-
                 case SDL_KEYDOWN:
                     key_handler(&event, state, &running);
                     break;
-
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
                         event.window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -429,9 +427,6 @@ static void handle_sdl_events(struct bv_prog_state *state) {
                                event.window.event == SDL_WINDOWEVENT_RESTORED) {
                         state->needs_redraw = 1;
                     }
-                    break;
-
-                default:
                     break;
             }
         }
