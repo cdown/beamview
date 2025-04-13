@@ -94,7 +94,6 @@ static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
                     new_width, new_height};
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, NULL, &dst);
     SDL_RenderPresent(renderer);
 }
