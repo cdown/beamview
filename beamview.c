@@ -431,6 +431,17 @@ static void handle_sdl_events(struct bv_prog_state *state) {
     }
 }
 
+static void free_prog_state(struct bv_prog_state *state) {
+    free_page_cache(&state->page_cache);
+    for (int i = 0; i < state->num_ctx; i++) {
+        SDL_DestroyTexture(state->ctx[i].texture.texture);
+        SDL_DestroyRenderer(state->ctx[i].renderer);
+        SDL_DestroyWindow(state->ctx[i].window);
+    }
+    free(state->ctx);
+    g_object_unref(state->document);
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <pdf_file>\n", argv[0]);
@@ -448,13 +459,6 @@ int main(int argc, char *argv[]) {
     }
 
     handle_sdl_events(&ps);
-    free_page_cache(&ps.page_cache);
-    for (int i = 0; i < ps.num_ctx; i++) {
-        SDL_DestroyTexture(ps.ctx[i].texture.texture);
-        SDL_DestroyRenderer(ps.ctx[i].renderer);
-        SDL_DestroyWindow(ps.ctx[i].window);
-    }
-    free(ps.ctx);
-    g_object_unref(ps.document);
+    free_prog_state(&ps);
     SDL_Quit();
 }
