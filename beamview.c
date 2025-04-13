@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
@@ -177,8 +176,6 @@ static enum cache_result page_cache_update(struct prog_state *state,
         cache_slot(&state->page_cache, page_index);
     if (slot->page_number == page_index)
         return CACHE_REUSED;
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
     _drop_(g_object_unref) PopplerPage *page =
         poppler_document_get_page(state->document, page_index);
     expect(page);
@@ -193,12 +190,6 @@ static enum cache_result page_cache_update(struct prog_state *state,
     slot->page_width = page_width;
     slot->page_height = page_height;
     slot->page_number = page_index;
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                            (end.tv_nsec - start.tv_nsec) / 1000000.0;
-    fprintf(stderr,
-            "Cache page %d created in %.2f ms. Rendered size: %d x %d\n",
-            page_index, render_time_ms, img_width, img_height);
     update_cache_status(state);
     return CACHE_UPDATED;
 }
@@ -327,7 +318,6 @@ static void update_scale(struct prog_state *state) {
     }
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
-    fprintf(stderr, "Window resized, new scale: %.2f\n", state->current_scale);
     for (int i = 0; i < CACHE_SIZE; i++) {
         invalidate_cache_slot(&state->page_cache.entries[i]);
     }
@@ -336,8 +326,6 @@ static void update_scale(struct prog_state *state) {
 }
 
 static void update_window_textures(struct prog_state *state) {
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
     struct render_cache_entry *entry =
         cache_slot(&state->page_cache, state->current_page);
     expect(entry->cairo_surface);
@@ -373,11 +361,6 @@ static void update_window_textures(struct prog_state *state) {
         present_texture(renderer, texdata->texture, region_width,
                         entry->img_height);
     }
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    double render_time_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
-                            (end.tv_nsec - start.tv_nsec) / 1000000.0;
-    fprintf(stderr, "Rendered page %d in %.2f ms\n", state->current_page,
-            render_time_ms);
     state->needs_redraw = 0;
 }
 
