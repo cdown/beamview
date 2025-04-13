@@ -45,7 +45,7 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
 #define PAGE_NUMBER_INVALID ((int)-1)
 #define CACHE_SIZE 3
 
-struct bv_texture_data {
+struct bv_texture {
     SDL_Texture *texture;
     int natural_width, natural_height;
 };
@@ -53,24 +53,23 @@ struct bv_texture_data {
 struct bv_sdl_ctx {
     SDL_Window *window;
     SDL_Renderer *renderer;
-    struct bv_texture_data texture;
+    struct bv_texture texture;
     int is_fullscreen;
 };
 
-struct bv_render_cache_entry {
+struct bv_cache_entry {
     cairo_surface_t *cairo_surface;
     int img_width, img_height;
     double page_width, page_height;
     int page_number;
 };
 
-struct bv_page_cache {
-    struct bv_render_cache_entry entries[CACHE_SIZE];
+struct bv_cache {
+    struct bv_cache_entry entries[CACHE_SIZE];
     int complete;
 };
 
-static struct bv_render_cache_entry *cache_slot(struct bv_page_cache *cache,
-                                                int page) {
+static struct bv_cache_entry *cache_slot(struct bv_cache *cache, int page) {
     return &cache->entries[page % CACHE_SIZE];
 }
 
@@ -79,7 +78,7 @@ struct bv_prog_state {
     double init_pdf_width, init_pdf_height, current_scale;
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, needs_redraw;
-    struct bv_page_cache page_cache;
+    struct bv_cache page_cache;
 };
 
 static void update_cache_status(struct bv_prog_state *state) {
@@ -158,7 +157,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     return surface;
 }
 
-static void invalidate_cache_slot(struct bv_render_cache_entry *slot) {
+static void invalidate_cache_slot(struct bv_cache_entry *slot) {
     if (slot->cairo_surface)
         cairo_surface_destroy(slot->cairo_surface);
     memset(slot, 0, sizeof(*slot));
@@ -172,8 +171,7 @@ enum cache_result {
 
 static enum cache_result page_cache_update(struct bv_prog_state *state,
                                            int page_index) {
-    struct bv_render_cache_entry *slot =
-        cache_slot(&state->page_cache, page_index);
+    struct bv_cache_entry *slot = cache_slot(&state->page_cache, page_index);
     if (slot->page_number == page_index)
         return CACHE_REUSED;
     _drop_(g_object_unref) PopplerPage *page =
@@ -194,7 +192,7 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
     return CACHE_UPDATED;
 }
 
-static void free_page_cache(struct bv_page_cache *cache) {
+static void free_page_cache(struct bv_cache *cache) {
     for (int i = 0; i < CACHE_SIZE; i++) {
         invalidate_cache_slot(&cache->entries[i]);
     }
@@ -306,7 +304,7 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
 
 static void update_scale(struct bv_prog_state *state) {
     double page_width, page_height;
-    struct bv_render_cache_entry *entry =
+    struct bv_cache_entry *entry =
         cache_slot(&state->page_cache, state->current_page);
     if (entry->page_number == state->current_page) {
         page_width = entry->page_width;
@@ -326,7 +324,7 @@ static void update_scale(struct bv_prog_state *state) {
 }
 
 static void update_window_textures(struct bv_prog_state *state) {
-    struct bv_render_cache_entry *entry =
+    struct bv_cache_entry *entry =
         cache_slot(&state->page_cache, state->current_page);
     expect(entry->cairo_surface);
     int base_split = entry->img_width / state->num_ctx;
@@ -336,7 +334,7 @@ static void update_window_textures(struct bv_prog_state *state) {
                                ? (entry->img_width - offset)
                                : base_split;
         SDL_Renderer *renderer = state->ctx[i].renderer;
-        struct bv_texture_data *texdata = &state->ctx[i].texture;
+        struct bv_texture *texdata = &state->ctx[i].texture;
         SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
         if (texdata->texture == NULL ||
             texdata->natural_width != region_width ||
