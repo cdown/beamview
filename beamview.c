@@ -208,40 +208,6 @@ static void idle_update_cache(struct bv_prog_state *state) {
         page_cache_update(state, state->current_page + 1);
 }
 
-static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
-    memset(state, 0, sizeof(*state));
-
-    char resolved_path[PATH_MAX];
-    if (!realpath(pdf_file, resolved_path)) {
-        perror("realpath");
-        return -errno;
-    }
-    _drop_(g_free) char *uri = g_strdup_printf("file://%s", resolved_path);
-    _drop_(g_error_free) GError *error = NULL;
-    state->document = poppler_document_new_from_file(uri, NULL, &error);
-
-    if (!state->document) {
-        fprintf(stderr, "Error opening PDF: %s\n", error->message);
-        return -EIO;
-    }
-
-    int num_pages = poppler_document_get_n_pages(state->document);
-    if (num_pages <= 0) {
-        fprintf(stderr, "PDF has no pages.\n");
-        g_object_unref(state->document);
-        return -EINVAL;
-    }
-    state->num_pages = num_pages;
-
-    state->current_scale = 1.0;
-    state->needs_redraw = 1;
-    memset(&state->page_cache, 0, sizeof(state->page_cache));
-    for (int i = 0; i < CACHE_SIZE; i++)
-        state->page_cache.entries[i].page_number = PAGE_NUMBER_INVALID;
-    page_cache_update(state, state->current_page);
-    return 0;
-}
-
 static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
     (void)dpy;
     (void)event;
@@ -284,6 +250,48 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
     }
+}
+
+static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
+    memset(state, 0, sizeof(*state));
+
+    char resolved_path[PATH_MAX];
+    if (!realpath(pdf_file, resolved_path)) {
+        perror("realpath");
+        return -errno;
+    }
+    _drop_(g_free) char *uri = g_strdup_printf("file://%s", resolved_path);
+    _drop_(g_error_free) GError *error = NULL;
+    state->document = poppler_document_new_from_file(uri, NULL, &error);
+
+    if (!state->document) {
+        fprintf(stderr, "Error opening PDF: %s\n", error->message);
+        return -EIO;
+    }
+
+    int num_pages = poppler_document_get_n_pages(state->document);
+    if (num_pages <= 0) {
+        fprintf(stderr, "PDF has no pages.\n");
+        g_object_unref(state->document);
+        return -EINVAL;
+    }
+    state->num_pages = num_pages;
+    state->current_scale = 1.0;
+    state->needs_redraw = 1;
+    memset(&state->page_cache, 0, sizeof(state->page_cache));
+    for (int i = 0; i < CACHE_SIZE; i++)
+        state->page_cache.entries[i].page_number = PAGE_NUMBER_INVALID;
+    page_cache_update(state, state->current_page);
+    state->num_ctx = NUM_CONTEXTS;
+    state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
+    expect(state->ctx);
+    create_contexts(state->ctx, state->num_ctx);
+    struct bv_cache_entry *first_cache = cache_slot(&state->page_cache, 0);
+    state->current_scale =
+        compute_scale(state->ctx, state->num_ctx, first_cache->page_width,
+                      first_cache->page_height);
+
+    return 0;
 }
 
 static void update_scale(struct bv_prog_state *state) {
@@ -439,14 +447,6 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    ps.num_ctx = NUM_CONTEXTS;
-    ps.ctx = calloc(ps.num_ctx, sizeof(struct bv_sdl_ctx));
-    expect(ps.ctx);
-    create_contexts(ps.ctx, ps.num_ctx);
-
-    struct bv_cache_entry *first_cache = cache_slot(&ps.page_cache, 0);
-    ps.current_scale = compute_scale(
-        ps.ctx, ps.num_ctx, first_cache->page_width, first_cache->page_height);
     handle_sdl_events(&ps);
     free_page_cache(&ps.page_cache);
     for (int i = 0; i < ps.num_ctx; i++) {
