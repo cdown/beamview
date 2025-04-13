@@ -103,8 +103,8 @@ static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
     int win_width, win_height;
     SDL_GetRendererOutputSize(renderer, &win_width, &win_height);
 
-    float scale = fmin((float)win_width / natural_width,
-                       (float)win_height / natural_height);
+    double scale = fmin((double)win_width / natural_width,
+                        (double)win_height / natural_height);
     int new_width = (int)(natural_width * scale);
     int new_height = (int)(natural_height * scale);
 
