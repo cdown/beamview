@@ -45,44 +45,44 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
 #define PAGE_NUMBER_INVALID ((int)-1)
 #define CACHE_SIZE 3
 
-struct texture_data {
+struct bv_texture_data {
     SDL_Texture *texture;
     int natural_width, natural_height;
 };
 
-struct sdl_ctx {
+struct bv_sdl_ctx {
     SDL_Window *window;
     SDL_Renderer *renderer;
-    struct texture_data texture;
+    struct bv_texture_data texture;
     int is_fullscreen;
 };
 
-struct render_cache_entry {
+struct bv_render_cache_entry {
     cairo_surface_t *cairo_surface;
     int img_width, img_height;
     double page_width, page_height;
     int page_number;
 };
 
-struct page_cache {
-    struct render_cache_entry entries[CACHE_SIZE];
+struct bv_page_cache {
+    struct bv_render_cache_entry entries[CACHE_SIZE];
     int complete;
 };
 
-static struct render_cache_entry *cache_slot(struct page_cache *cache,
-                                             int page) {
+static struct bv_render_cache_entry *cache_slot(struct bv_page_cache *cache,
+                                                int page) {
     return &cache->entries[page % CACHE_SIZE];
 }
 
-struct prog_state {
-    struct sdl_ctx *ctx;
+struct bv_prog_state {
+    struct bv_sdl_ctx *ctx;
     double init_pdf_width, init_pdf_height, current_scale;
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, needs_redraw;
-    struct page_cache page_cache;
+    struct bv_page_cache page_cache;
 };
 
-static void update_cache_status(struct prog_state *state) {
+static void update_cache_status(struct bv_prog_state *state) {
     int curr = state->current_page;
     state->page_cache.complete =
         ((curr == 0) ||
@@ -91,7 +91,7 @@ static void update_cache_status(struct prog_state *state) {
          (cache_slot(&state->page_cache, curr + 1)->page_number == curr + 1));
 }
 
-static void toggle_fullscreen(struct sdl_ctx *ctx) {
+static void toggle_fullscreen(struct bv_sdl_ctx *ctx) {
     SDL_SetWindowFullscreen(
         ctx->window, ctx->is_fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
     ctx->is_fullscreen = !ctx->is_fullscreen;
@@ -117,7 +117,7 @@ static void present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
     SDL_RenderPresent(renderer);
 }
 
-static double compute_scale(struct sdl_ctx ctx[], int num_ctx,
+static double compute_scale(struct bv_sdl_ctx ctx[], int num_ctx,
                             double page_width, double page_height) {
     expect(page_width > 0 && page_height > 0);
     double scale = 0;
@@ -158,7 +158,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     return surface;
 }
 
-static void invalidate_cache_slot(struct render_cache_entry *slot) {
+static void invalidate_cache_slot(struct bv_render_cache_entry *slot) {
     if (slot->cairo_surface)
         cairo_surface_destroy(slot->cairo_surface);
     memset(slot, 0, sizeof(*slot));
@@ -170,9 +170,9 @@ enum cache_result {
     CACHE_REUSED,
 };
 
-static enum cache_result page_cache_update(struct prog_state *state,
+static enum cache_result page_cache_update(struct bv_prog_state *state,
                                            int page_index) {
-    struct render_cache_entry *slot =
+    struct bv_render_cache_entry *slot =
         cache_slot(&state->page_cache, page_index);
     if (slot->page_number == page_index)
         return CACHE_REUSED;
@@ -194,13 +194,13 @@ static enum cache_result page_cache_update(struct prog_state *state,
     return CACHE_UPDATED;
 }
 
-static void free_page_cache(struct page_cache *cache) {
+static void free_page_cache(struct bv_page_cache *cache) {
     for (int i = 0; i < CACHE_SIZE; i++) {
         invalidate_cache_slot(&cache->entries[i]);
     }
 }
 
-static void idle_update_cache(struct prog_state *state) {
+static void idle_update_cache(struct bv_prog_state *state) {
     if (state->page_cache.complete)
         return;
     if (state->current_page > 0)
@@ -209,7 +209,7 @@ static void idle_update_cache(struct prog_state *state) {
         page_cache_update(state, state->current_page + 1);
 }
 
-static int init_prog_state(struct prog_state *state, const char *pdf_file) {
+static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     memset(state, 0, sizeof(*state));
 
     char resolved_path[PATH_MAX];
@@ -281,7 +281,7 @@ static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
     return renderer;
 }
 
-static void create_contexts(struct sdl_ctx ctx[], int num_ctx) {
+static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
     SDL_Rect display_bounds;
     expect(SDL_GetDisplayBounds(0, &display_bounds) == 0);
     const int win_width = 1280;
@@ -304,9 +304,9 @@ static void create_contexts(struct sdl_ctx ctx[], int num_ctx) {
     }
 }
 
-static void update_scale(struct prog_state *state) {
+static void update_scale(struct bv_prog_state *state) {
     double page_width, page_height;
-    struct render_cache_entry *entry =
+    struct bv_render_cache_entry *entry =
         cache_slot(&state->page_cache, state->current_page);
     if (entry->page_number == state->current_page) {
         page_width = entry->page_width;
@@ -325,8 +325,8 @@ static void update_scale(struct prog_state *state) {
     state->needs_redraw = 1;
 }
 
-static void update_window_textures(struct prog_state *state) {
-    struct render_cache_entry *entry =
+static void update_window_textures(struct bv_prog_state *state) {
+    struct bv_render_cache_entry *entry =
         cache_slot(&state->page_cache, state->current_page);
     expect(entry->cairo_surface);
     int base_split = entry->img_width / state->num_ctx;
@@ -336,7 +336,7 @@ static void update_window_textures(struct prog_state *state) {
                                ? (entry->img_width - offset)
                                : base_split;
         SDL_Renderer *renderer = state->ctx[i].renderer;
-        struct texture_data *texdata = &state->ctx[i].texture;
+        struct bv_texture_data *texdata = &state->ctx[i].texture;
         SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
         if (texdata->texture == NULL ||
             texdata->natural_width != region_width ||
@@ -364,7 +364,7 @@ static void update_window_textures(struct prog_state *state) {
     state->needs_redraw = 0;
 }
 
-static void key_handler(const SDL_Event *event, struct prog_state *state,
+static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
                         int *running) {
     const SDL_Keycode key = event->key.keysym.sym;
     const Uint16 mod = event->key.keysym.mod;
@@ -404,7 +404,7 @@ static void key_handler(const SDL_Event *event, struct prog_state *state,
     }
 }
 
-static void handle_sdl_events(struct prog_state *state) {
+static void handle_sdl_events(struct bv_prog_state *state) {
     int running = 1;
     while (running) {
         if (!state->needs_redraw && state->page_cache.complete) {
@@ -456,14 +456,14 @@ int main(int argc, char *argv[]) {
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
     expect(SDL_Init(SDL_INIT_VIDEO) == 0);
 
-    struct prog_state ps;
+    struct bv_prog_state ps;
     if (init_prog_state(&ps, pdf_file) < 0) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
 
     ps.num_ctx = NUM_CONTEXTS;
-    ps.ctx = calloc(ps.num_ctx, sizeof(struct sdl_ctx));
+    ps.ctx = calloc(ps.num_ctx, sizeof(struct bv_sdl_ctx));
     expect(ps.ctx);
     create_contexts(ps.ctx, ps.num_ctx);
 
