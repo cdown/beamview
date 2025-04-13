@@ -75,7 +75,7 @@ static struct bv_cache_entry *cache_slot(struct bv_cache *cache, int page) {
 
 struct bv_prog_state {
     struct bv_sdl_ctx *ctx;
-    double init_pdf_width, init_pdf_height, current_scale;
+    double current_scale;
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, needs_redraw;
     struct bv_cache page_cache;
@@ -233,15 +233,6 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     }
     state->num_pages = num_pages;
 
-    _drop_(g_object_unref) PopplerPage *first_page =
-        poppler_document_get_page(state->document, 0);
-    if (!first_page) {
-        fprintf(stderr, "Failed to load first page.\n");
-        g_object_unref(state->document);
-        return -ENOENT;
-    }
-    poppler_page_get_size(first_page, &state->init_pdf_width,
-                          &state->init_pdf_height);
     state->current_scale = 1.0;
     state->needs_redraw = 1;
     memset(&state->page_cache, 0, sizeof(state->page_cache));
@@ -453,8 +444,9 @@ int main(int argc, char *argv[]) {
     expect(ps.ctx);
     create_contexts(ps.ctx, ps.num_ctx);
 
-    ps.current_scale = compute_scale(ps.ctx, ps.num_ctx, ps.init_pdf_width,
-                                     ps.init_pdf_height);
+    struct bv_cache_entry *first_cache = cache_slot(&ps.page_cache, 0);
+    ps.current_scale = compute_scale(
+        ps.ctx, ps.num_ctx, first_cache->page_width, first_cache->page_height);
     handle_sdl_events(&ps);
     free_page_cache(&ps.page_cache);
     for (int i = 0; i < ps.num_ctx; i++) {
