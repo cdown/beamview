@@ -41,7 +41,7 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
         }                                                                      \
     } while (0)
 
-#define PAGE_NUMBER_INVALID -1
+static const int page_number_invalid = -1;
 #define CACHE_SIZE 3
 
 struct bv_texture {
@@ -161,7 +161,7 @@ static void invalidate_cache_slot(struct bv_cache_entry *slot) {
     if (slot->cairo_surface)
         cairo_surface_destroy(slot->cairo_surface);
     memset(slot, 0, sizeof(*slot));
-    slot->page_number = PAGE_NUMBER_INVALID;
+    slot->page_number = page_number_invalid;
 }
 
 enum cache_result {
@@ -279,7 +279,7 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->needs_redraw = 1;
     memset(&state->page_cache, 0, sizeof(state->page_cache));
     for (int i = 0; i < CACHE_SIZE; i++)
-        state->page_cache.entries[i].page_number = PAGE_NUMBER_INVALID;
+        state->page_cache.entries[i].page_number = page_number_invalid;
     page_cache_update(state, state->current_page);
     state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
