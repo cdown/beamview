@@ -41,7 +41,7 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
         }                                                                      \
     } while (0)
 
-#define PAGE_NUMBER_INVALID ((int)-1)
+#define PAGE_NUMBER_INVALID -1
 #define CACHE_SIZE 3
 
 struct bv_texture {
