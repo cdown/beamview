@@ -41,7 +41,6 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
         }                                                                      \
     } while (0)
 
-#define NUM_CONTEXTS 2
 #define PAGE_NUMBER_INVALID ((int)-1)
 #define CACHE_SIZE 3
 
@@ -282,7 +281,7 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     for (int i = 0; i < CACHE_SIZE; i++)
         state->page_cache.entries[i].page_number = PAGE_NUMBER_INVALID;
     page_cache_update(state, state->current_page);
-    state->num_ctx = NUM_CONTEXTS;
+    state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
     create_contexts(state->ctx, state->num_ctx);
