@@ -160,7 +160,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
 static void invalidate_cache_slot(struct bv_cache_entry *slot) {
     if (slot->cairo_surface)
         cairo_surface_destroy(slot->cairo_surface);
-    memset(slot, 0, sizeof(*slot));
+    *slot = (struct bv_cache_entry){0};
     slot->page_number = page_number_invalid;
 }
 
@@ -252,7 +252,7 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
 }
 
 static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
-    memset(state, 0, sizeof(*state));
+    *state = (struct bv_prog_state){0};
 
     char resolved_path[PATH_MAX];
     if (!realpath(pdf_file, resolved_path)) {
@@ -277,7 +277,7 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->num_pages = num_pages;
     state->current_scale = 1.0;
     state->needs_redraw = 1;
-    memset(&state->page_cache, 0, sizeof(state->page_cache));
+    state->page_cache = (struct bv_cache){0};
     for (int i = 0; i < CACHE_SIZE; i++)
         state->page_cache.entries[i].page_number = page_number_invalid;
     page_cache_update(state, state->current_page);
