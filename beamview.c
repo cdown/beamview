@@ -280,15 +280,18 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->page_cache = (struct bv_cache){0};
     for (int i = 0; i < CACHE_SIZE; i++)
         state->page_cache.entries[i].page_number = page_number_invalid;
-    page_cache_update(state, state->current_page);
     state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
     create_contexts(state->ctx, state->num_ctx);
-    struct bv_cache_entry *first_cache = cache_slot(&state->page_cache, 0);
+    _drop_(g_object_unref) PopplerPage *first_page =
+        poppler_document_get_page(state->document, state->current_page);
+    expect(first_page);
+    double page_width, page_height;
+    poppler_page_get_size(first_page, &page_width, &page_height);
     state->current_scale =
-        compute_scale(state->ctx, state->num_ctx, first_cache->page_width,
-                      first_cache->page_height);
+        compute_scale(state->ctx, state->num_ctx, page_width, page_height);
+    page_cache_update(state, state->current_page);
 
     return 0;
 }
