@@ -26,7 +26,6 @@
         }                                                                      \
     }
 
-DEFINE_DROP_FUNC(cairo_surface_t *, cairo_surface_destroy)
 DEFINE_DROP_FUNC(cairo_t *, cairo_destroy)
 DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
 DEFINE_DROP_FUNC_COERCE(gpointer, g_free)
