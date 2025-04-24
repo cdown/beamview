@@ -16,10 +16,15 @@ debug: beamview
 sanitisers: CFLAGS = $(CFLAGS_SANITISERS)
 sanitisers: beamview
 
+clang-tidy:
+	clang-tidy beamview.c \
+	  -checks=-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling \
+	  -- $(COMMON_CFLAGS)
+
 beamview: beamview.c
 	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 
 clean:
 	rm -f beamview
 
-.PHONY: all release debug sanitisers clean
+.PHONY: all release debug sanitisers clang-tidy clean
