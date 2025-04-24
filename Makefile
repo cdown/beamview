@@ -27,4 +27,15 @@ beamview: beamview.c
 clean:
 	rm -f beamview
 
-.PHONY: all release debug sanitisers clang-tidy clean
+prefix ?= /usr/local
+bindir = $(prefix)/bin
+mandir = $(prefix)/share/man/man1
+INSTALL = install
+
+install: release
+	mkdir -p $(DESTDIR)$(bindir)
+	$(INSTALL) -m 755 beamview   $(DESTDIR)$(bindir)/beamview
+	mkdir -p $(DESTDIR)$(mandir)
+	$(INSTALL) -m 644 beamview.1 $(DESTDIR)$(mandir)/beamview.1
+
+.PHONY: all release debug sanitisers clang-tidy install clean
