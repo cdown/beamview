@@ -1,0 +1,40 @@
+jobs:
+  build_and_test:
+    name: CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Add Ubuntu toolchain PPA
+        run: sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+      - name: Update apt cache
+        run: sudo apt-get update
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get install -y \
+            gcc-10 \
+            clang \
+            clang-tidy \
+            pkg-config \
+            libsdl2-dev \
+            libpoppler-glib-dev \
+            libcairo2-dev \
+            libglib2.0-dev \
+            libx11-dev
+
+      - name: Verify compiler
+        run: gcc --version
+
+      - name: Build (release)
+        run: make clean all
+
+      - name: Run clang-tidy
+        run: make clean clang-tidy
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
