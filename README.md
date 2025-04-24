@@ -46,7 +46,7 @@ Run `make` to compile. You will need the following dependencies:
 ## Comparison with other tools
 
 I used to use [pdfpc](https://github.com/pdfpc/pdfpc), and then
-[dspdfviewer](https://github.com/dannyedel/dspdfviewer). The pdfpc toolbase is
+[dspdfviewer](https://github.com/dannyedel/dspdfviewer). The pdfpc codebase is
 too complex for my tastes and would basically be the only reason I need a Vala
 compiler. dspdfviewer is, unfortunately, unmaintained for over two years and
 somewhat crash-prone in my experience, which is obviously not good if you are
