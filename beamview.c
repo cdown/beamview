@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define _drop_(x) __attribute__((cleanup(drop_##x)))
 
@@ -445,7 +446,13 @@ static void free_prog_state(struct bv_prog_state *state) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <pdf_file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <pdf_file>\nSee `man 1 beamview`.\n",
+                argv[0]);
+        return EXIT_FAILURE;
+    }
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+        execlp("man", "man", "1", "beamview", NULL);
+        perror("execlp man");
         return EXIT_FAILURE;
     }
     const char *pdf_file = argv[1];
