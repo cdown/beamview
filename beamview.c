@@ -1,5 +1,7 @@
 #include <SDL2/SDL.h>
-#include <X11/Xlib.h>
+#ifdef HAVE_X11
+    #include <X11/Xlib.h>
+#endif
 #include <cairo.h>
 #include <errno.h>
 #include <glib.h>
@@ -44,6 +46,68 @@ DEFINE_DROP_FUNC(GError *, g_error_free)
 #define NUM_CONTEXTS 2
 #define PAGE_NUMBER_INVALID ((int)-1)
 #define CACHE_SIZE 3
+
+static SDL_Renderer *create_renderer_generic(SDL_Window *window) {
+    SDL_Renderer *r = SDL_CreateRenderer(
+        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!r) {
+        fprintf(
+            stderr,
+            "Warning: hardware acceleration unavailable, using software rendering\n");
+        r = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+    return r;
+}
+
+#ifdef HAVE_X11
+
+static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
+    (void)dpy;
+    (void)event;
+    return 0;
+}
+
+static int sdl_on_x11(void) {
+    static int is_x11 = -1;
+    if (is_x11 < 0) {
+        const char *drv = SDL_GetCurrentVideoDriver();
+        is_x11 = (drv && strcmp(drv, "x11") == 0) ? 1 : 0;
+    }
+    return is_x11;
+}
+
+static SDL_Renderer *create_renderer_x11(SDL_Window *window) {
+    int (*old_handler)(Display *, XErrorEvent *) =
+        XSetErrorHandler(accel_x11_error_handler);
+    SDL_Renderer *r = SDL_CreateRenderer(
+        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    XSetErrorHandler(old_handler);
+    if (!r) {
+        fprintf(
+            stderr,
+            "Warning: X11 accelerated renderer failed, using software rendering\n");
+        r = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+    return r;
+}
+
+#else /* !HAVE_X11 */
+
+static int sdl_on_x11(void) { return 0; }
+
+static SDL_Renderer *create_renderer_x11(SDL_Window *window) {
+    (void)window;
+    return NULL;
+}
+
+#endif /* HAVE_X11 */
+
+static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
+    if (sdl_on_x11()) {
+        return create_renderer_x11(window);
+    }
+    return create_renderer_generic(window);
+}
 
 struct bv_texture {
     SDL_Texture *texture;
@@ -206,27 +270,6 @@ static void idle_update_cache(struct bv_prog_state *state) {
         page_cache_update(state, state->current_page - 1);
     if (state->current_page < state->num_pages - 1)
         page_cache_update(state, state->current_page + 1);
-}
-
-static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
-    (void)dpy;
-    (void)event;
-    return 0;
-}
-
-static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
-    int (*old_handler)(Display *, XErrorEvent *) =
-        XSetErrorHandler(accel_x11_error_handler); // Avoid BadValue crash
-    SDL_Renderer *renderer = SDL_CreateRenderer(
-        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    XSetErrorHandler(old_handler);
-    if (!renderer) {
-        fprintf(
-            stderr,
-            "Warning: hardware acceleration seems unavailable, using software rendering\n");
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    }
-    return renderer;
 }
 
 static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {

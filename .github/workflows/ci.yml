@@ -2,6 +2,9 @@ jobs:
   build_and_test:
     name: CI
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        want_x11: [true, false]
 
     steps:
       - uses: actions/checkout@v3
@@ -23,18 +26,19 @@ jobs:
             libpoppler-glib-dev \
             libcairo2-dev \
             libglib2.0-dev \
-            libx11-dev
+            $( if [ "${{ matrix.want_x11 }}" = "true" ]; then echo "libx11-dev"; fi )
 
       - name: Verify compiler
         run: gcc --version
 
       - name: Build (release)
-        run: make clean all
+        run: make clean all WANT_X11=${{ matrix.want_x11 && '1' || '0' }}
 
       - name: Run clang-tidy
-        run: make clean clang-tidy
+        run: make clean clang-tidy WANT_X11=${{ matrix.want_x11 && '1' || '0' }}
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+
