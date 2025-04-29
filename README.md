@@ -10,7 +10,7 @@ A dual-screen PDF viewer for presenting Beamer presentations with notes.
 - Slide pre-rendering and caching for instantaneous navigation
 - Simple keyboard navigation
 - Minimal resource usage
-- Clean, simple codebase (~500 lines)
+- Clean, simple codebase (~400 lines)
 
 ## Usage
 
