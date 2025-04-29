@@ -155,12 +155,6 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
     return CACHE_UPDATED;
 }
 
-static void free_page_cache(struct bv_cache *cache) {
-    for (int i = 0; i < CACHE_SIZE; i++) {
-        invalidate_cache_slot(&cache->entries[i]);
-    }
-}
-
 static void idle_update_cache(struct bv_prog_state *state) {
     if (state->current_page > 0)
         page_cache_update(state, state->current_page - 1);
@@ -398,7 +392,9 @@ static void handle_sdl_events(struct bv_prog_state *state) {
 }
 
 static void free_prog_state(struct bv_prog_state *state) {
-    free_page_cache(&state->page_cache);
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        invalidate_cache_slot(&state->page_cache.entries[i]);
+    }
     for (int i = 0; i < state->num_ctx; i++) {
         SDL_DestroyTexture(state->ctx[i].texture.texture);
         SDL_DestroyRenderer(state->ctx[i].renderer);
