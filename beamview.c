@@ -11,27 +11,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#define _drop_(x) __attribute__((cleanup(drop_##x)))
-
-#define DEFINE_DROP_FUNC(type, func)                                           \
-    static inline void drop_##func(type *p) {                                  \
-        if (*p)                                                                \
-            func(*p);                                                          \
-    }
-
-#define DEFINE_DROP_FUNC_COERCE(type, func)                                    \
-    static inline void drop_##func(void *p) {                                  \
-        type *pp = (type *)p;                                                  \
-        if (*pp) {                                                             \
-            func((type) * pp);                                                 \
-        }                                                                      \
-    }
-
-DEFINE_DROP_FUNC(cairo_t *, cairo_destroy)
-DEFINE_DROP_FUNC_COERCE(GObject *, g_object_unref)
-DEFINE_DROP_FUNC_COERCE(gpointer, g_free)
-DEFINE_DROP_FUNC(GError *, g_error_free)
-
 #define expect(x)                                                              \
     do {                                                                       \
         if (!(x)) {                                                            \
@@ -130,7 +109,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
 
     cairo_surface_t *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, *img_width, *img_height);
-    _drop_(cairo_destroy) cairo_t *cr = cairo_create(surface);
+    cairo_t *cr = cairo_create(surface);
     expect(cairo_status(cr) == CAIRO_STATUS_SUCCESS);
 
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
@@ -143,6 +122,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
     cairo_pattern_t *pattern = cairo_get_source(cr);
     cairo_pattern_set_filter(pattern, CAIRO_FILTER_BEST);
     cairo_surface_flush(surface);
+    cairo_destroy(cr);
 
     return surface;
 }
@@ -164,8 +144,7 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
     struct bv_cache_entry *slot = cache_slot(&state->page_cache, page_index);
     if (slot->page_number == page_index)
         return CACHE_REUSED;
-    _drop_(g_object_unref) PopplerPage *page =
-        poppler_document_get_page(state->document, page_index);
+    PopplerPage *page = poppler_document_get_page(state->document, page_index);
     expect(page);
     int img_width, img_height;
     double page_width, page_height;
@@ -178,6 +157,7 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
     slot->page_width = page_width;
     slot->page_height = page_height;
     slot->page_number = page_index;
+    g_object_unref(page);
     return CACHE_UPDATED;
 }
 
@@ -247,12 +227,14 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
         perror("realpath");
         return -errno;
     }
-    _drop_(g_free) char *uri = g_strdup_printf("file://%s", resolved_path);
-    _drop_(g_error_free) GError *error = NULL;
+    char *uri = g_strdup_printf("file://%s", resolved_path);
+    GError *error = NULL;
     state->document = poppler_document_new_from_file(uri, NULL, &error);
+    g_free(uri);
 
     if (!state->document) {
         fprintf(stderr, "Error opening PDF: %s\n", error->message);
+        g_error_free(error);
         return -EIO;
     }
 
@@ -273,11 +255,12 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
     create_contexts(state->ctx, state->num_ctx);
-    _drop_(g_object_unref) PopplerPage *first_page =
+    PopplerPage *first_page =
         poppler_document_get_page(state->document, state->current_page);
     expect(first_page);
     double page_width, page_height;
     poppler_page_get_size(first_page, &page_width, &page_height);
+    g_object_unref(first_page);
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     page_cache_update(state, state->current_page);
@@ -293,9 +276,10 @@ static void update_scale(struct bv_prog_state *state) {
         page_width = entry->page_width;
         page_height = entry->page_height;
     } else {
-        _drop_(g_object_unref) PopplerPage *page =
+        PopplerPage *page =
             poppler_document_get_page(state->document, state->current_page);
         poppler_page_get_size(page, &page_width, &page_height);
+        g_object_unref(page);
     }
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
