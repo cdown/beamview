@@ -351,8 +351,7 @@ static void handle_sdl_events(struct bv_prog_state *state) {
                     key_handler(&event, state, &running);
                     break;
                 case SDL_WINDOWEVENT:
-                    if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                        event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                         update_scale(state);
                     } else if (event.window.event == SDL_WINDOWEVENT_EXPOSED ||
                                event.window.event == SDL_WINDOWEVENT_SHOWN ||
