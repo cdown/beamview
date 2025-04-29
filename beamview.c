@@ -200,13 +200,9 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
     const int offset = 100;
 
     for (int i = 0; i < num_ctx; i++) {
-        char title[32];
-        snprintf(title, sizeof(title), "beamview: Context %d", i);
-        int x = center_x + i * offset;
-        int y = center_y + i * offset;
-        ctx[i].window =
-            SDL_CreateWindow(title, x, y, win_width, win_height,
-                             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        ctx[i].window = SDL_CreateWindow(
+            "beamview", center_x + i * offset, center_y + i * offset, win_width,
+            win_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
         expect(ctx[i].window);
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
