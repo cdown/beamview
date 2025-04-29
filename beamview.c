@@ -43,12 +43,9 @@ struct bv_cache_entry {
     int page_number;
 };
 
-struct bv_cache {
-    struct bv_cache_entry entries[CACHE_SIZE];
-};
-
-static struct bv_cache_entry *cache_slot(struct bv_cache *cache, int page) {
-    return &cache->entries[page % CACHE_SIZE];
+static struct bv_cache_entry *cache_slot(struct bv_cache_entry cache[],
+                                         int page) {
+    return &cache[page % CACHE_SIZE];
 }
 
 struct bv_prog_state {
@@ -56,7 +53,7 @@ struct bv_prog_state {
     double current_scale;
     PopplerDocument *document;
     int num_ctx, current_page, num_pages, needs_redraw, needs_cache;
-    struct bv_cache page_cache;
+    struct bv_cache_entry page_cache[CACHE_SIZE];
 };
 
 static void toggle_fullscreen(struct bv_sdl_ctx *ctx) {
@@ -142,7 +139,7 @@ enum cache_result {
 
 static enum cache_result page_cache_update(struct bv_prog_state *state,
                                            int page_index) {
-    struct bv_cache_entry *slot = cache_slot(&state->page_cache, page_index);
+    struct bv_cache_entry *slot = cache_slot(state->page_cache, page_index);
     if (slot->page_number == page_index)
         return CACHE_REUSED;
     PopplerPage *page = poppler_document_get_page(state->document, page_index);
@@ -219,7 +216,7 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->needs_redraw = 1;
     state->needs_cache = 1;
     for (int i = 0; i < CACHE_SIZE; i++) {
-        invalidate_cache_slot(&state->page_cache.entries[i]);
+        invalidate_cache_slot(&state->page_cache[i]);
     }
     state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
@@ -239,7 +236,7 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
 static void update_scale(struct bv_prog_state *state) {
     double page_width, page_height;
     struct bv_cache_entry *entry =
-        cache_slot(&state->page_cache, state->current_page);
+        cache_slot(state->page_cache, state->current_page);
     if (entry->page_number == state->current_page) {
         page_width = entry->page_width;
         page_height = entry->page_height;
@@ -252,7 +249,7 @@ static void update_scale(struct bv_prog_state *state) {
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     for (int i = 0; i < CACHE_SIZE; i++) {
-        invalidate_cache_slot(&state->page_cache.entries[i]);
+        invalidate_cache_slot(&state->page_cache[i]);
     }
     page_cache_update(state, state->current_page);
     state->needs_redraw = 1;
@@ -261,7 +258,7 @@ static void update_scale(struct bv_prog_state *state) {
 
 static void update_window_textures(struct bv_prog_state *state) {
     struct bv_cache_entry *entry =
-        cache_slot(&state->page_cache, state->current_page);
+        cache_slot(state->page_cache, state->current_page);
     expect(entry->cairo_surface);
     int base_split = entry->img_width / state->num_ctx;
     for (int i = 0; i < state->num_ctx; i++) {
@@ -377,7 +374,7 @@ static void handle_sdl_events(struct bv_prog_state *state) {
 
 static void free_prog_state(struct bv_prog_state *state) {
     for (int i = 0; i < CACHE_SIZE; i++) {
-        invalidate_cache_slot(&state->page_cache.entries[i]);
+        invalidate_cache_slot(&state->page_cache[i]);
     }
     for (int i = 0; i < state->num_ctx; i++) {
         SDL_DestroyTexture(state->ctx[i].texture.texture);
