@@ -1,7 +1,6 @@
 #include <SDL2/SDL.h>
 #include <X11/Xlib.h>
 #include <cairo.h>
-#include <errno.h>
 #include <glib.h>
 #include <limits.h>
 #include <math.h>
