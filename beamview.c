@@ -428,12 +428,9 @@ int main(int argc, char *argv[]) {
     expect(SDL_Init(SDL_INIT_VIDEO) == 0);
 
     struct bv_prog_state ps;
-    if (init_prog_state(&ps, argv[1]) < 0) {
-        SDL_Quit();
+    if (init_prog_state(&ps, argv[1]) < 0)
         return EXIT_FAILURE;
-    }
 
     handle_sdl_events(&ps);
     free_prog_state(&ps);
-    SDL_Quit();
 }
