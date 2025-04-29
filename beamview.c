@@ -423,13 +423,12 @@ int main(int argc, char *argv[]) {
         perror("execlp man");
         return EXIT_FAILURE;
     }
-    const char *pdf_file = argv[1];
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
     expect(SDL_Init(SDL_INIT_VIDEO) == 0);
 
     struct bv_prog_state ps;
-    if (init_prog_state(&ps, pdf_file) < 0) {
+    if (init_prog_state(&ps, argv[1]) < 0) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
