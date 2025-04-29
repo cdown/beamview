@@ -65,7 +65,6 @@ struct bv_cache_entry {
 
 struct bv_cache {
     struct bv_cache_entry entries[CACHE_SIZE];
-    int complete;
 };
 
 static struct bv_cache_entry *cache_slot(struct bv_cache *cache, int page) {
@@ -76,18 +75,9 @@ struct bv_prog_state {
     struct bv_sdl_ctx *ctx;
     double current_scale;
     PopplerDocument *document;
-    int num_ctx, current_page, num_pages, needs_redraw;
+    int num_ctx, current_page, num_pages, needs_redraw, needs_cache;
     struct bv_cache page_cache;
 };
-
-static void update_cache_status(struct bv_prog_state *state) {
-    int curr = state->current_page;
-    state->page_cache.complete =
-        ((curr == 0) ||
-         (cache_slot(&state->page_cache, curr - 1)->page_number == curr - 1)) &&
-        ((curr == state->num_pages - 1) ||
-         (cache_slot(&state->page_cache, curr + 1)->page_number == curr + 1));
-}
 
 static void toggle_fullscreen(struct bv_sdl_ctx *ctx) {
     SDL_SetWindowFullscreen(
@@ -188,7 +178,6 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
     slot->page_width = page_width;
     slot->page_height = page_height;
     slot->page_number = page_index;
-    update_cache_status(state);
     return CACHE_UPDATED;
 }
 
@@ -199,12 +188,11 @@ static void free_page_cache(struct bv_cache *cache) {
 }
 
 static void idle_update_cache(struct bv_prog_state *state) {
-    if (state->page_cache.complete)
-        return;
     if (state->current_page > 0)
         page_cache_update(state, state->current_page - 1);
     if (state->current_page < state->num_pages - 1)
         page_cache_update(state, state->current_page + 1);
+    state->needs_cache = 0;
 }
 
 static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
@@ -277,6 +265,7 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->num_pages = num_pages;
     state->current_scale = 1.0;
     state->needs_redraw = 1;
+    state->needs_cache = 1;
     state->page_cache = (struct bv_cache){0};
     for (int i = 0; i < CACHE_SIZE; i++)
         state->page_cache.entries[i].page_number = page_number_invalid;
@@ -315,6 +304,7 @@ static void update_scale(struct bv_prog_state *state) {
     }
     page_cache_update(state, state->current_page);
     state->needs_redraw = 1;
+    state->needs_cache = 1;
 }
 
 static void update_window_textures(struct bv_prog_state *state) {
@@ -390,8 +380,8 @@ static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
                     new_page);
             }
             state->current_page = new_page;
-            update_cache_status(state);
             state->needs_redraw = 1;
+            state->needs_cache = 1;
         }
     }
 }
@@ -399,7 +389,7 @@ static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
 static void handle_sdl_events(struct bv_prog_state *state) {
     int running = 1;
     while (running) {
-        if (!state->needs_redraw && state->page_cache.complete) {
+        if (!state->needs_redraw && !state->needs_cache) {
             SDL_WaitEvent(NULL);
         }
 
@@ -427,7 +417,7 @@ static void handle_sdl_events(struct bv_prog_state *state) {
 
         if (state->needs_redraw) {
             update_window_textures(state);
-        } else {
+        } else if (state->needs_cache) {
             idle_update_cache(state);
         }
     }
