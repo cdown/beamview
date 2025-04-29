@@ -176,9 +176,7 @@ static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     XSetErrorHandler(old_handler);
     if (!renderer) {
-        fprintf(
-            stderr,
-            "Warning: hardware acceleration seems unavailable, using software rendering\n");
+        fprintf(stderr, "Warning: hardware acceleration unavailable\n");
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     }
     return renderer;
