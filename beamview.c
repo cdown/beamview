@@ -146,16 +146,10 @@ static enum cache_result page_cache_update(struct bv_prog_state *state,
         return CACHE_REUSED;
     PopplerPage *page = poppler_document_get_page(state->document, page_index);
     expect(page);
-    int img_width, img_height;
-    double page_width, page_height;
     invalidate_cache_slot(slot);
-    slot->cairo_surface =
-        render_page_to_cairo_surface(page, state->current_scale, &img_width,
-                                     &img_height, &page_width, &page_height);
-    slot->img_width = img_width;
-    slot->img_height = img_height;
-    slot->page_width = page_width;
-    slot->page_height = page_height;
+    slot->cairo_surface = render_page_to_cairo_surface(
+        page, state->current_scale, &slot->img_width, &slot->img_height,
+        &slot->page_width, &slot->page_height);
     slot->page_number = page_index;
     g_object_unref(page);
     return CACHE_UPDATED;
