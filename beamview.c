@@ -230,9 +230,9 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->current_scale = 1.0;
     state->needs_redraw = 1;
     state->needs_cache = 1;
-    state->page_cache = (struct bv_cache){0};
-    for (int i = 0; i < CACHE_SIZE; i++)
-        state->page_cache.entries[i].page_number = page_number_invalid;
+    for (int i = 0; i < CACHE_SIZE; i++) {
+        invalidate_cache_slot(&state->page_cache.entries[i]);
+    }
     state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
