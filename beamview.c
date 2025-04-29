@@ -11,14 +11,15 @@
 #include <string.h>
 #include <unistd.h>
 
-#define expect(x)                                                              \
+#define die_on(cond, fmt, ...)                                                 \
     do {                                                                       \
-        if (!(x)) {                                                            \
-            fprintf(stderr, "!(%s) at %s:%s:%d\n", #x, __FILE__, __func__,     \
-                    __LINE__);                                                 \
-            abort();                                                           \
+        if (cond) {                                                            \
+            fprintf(stderr, "FATAL: " fmt, ##__VA_ARGS__);                     \
+            exit(1);                                                           \
         }                                                                      \
     } while (0)
+#define expect(x)                                                              \
+    die_on(!(x), "!(%s) at %s:%s:%d\n", #x, __FILE__, __func__, __LINE__)
 
 static const int page_number_invalid = -1;
 #define CACHE_SIZE 3
@@ -201,32 +202,19 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
     }
 }
 
-static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
+static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     *state = (struct bv_prog_state){0};
 
     char resolved_path[PATH_MAX];
-    if (!realpath(pdf_file, resolved_path)) {
-        perror("realpath");
-        return -errno;
-    }
+    die_on(!realpath(pdf_file, resolved_path), "Couldn't resolve %s\n",
+           pdf_file);
     char *uri = g_strdup_printf("file://%s", resolved_path);
     GError *error = NULL;
     state->document = poppler_document_new_from_file(uri, NULL, &error);
     g_free(uri);
-
-    if (!state->document) {
-        fprintf(stderr, "Error opening PDF: %s\n", error->message);
-        g_error_free(error);
-        return -EIO;
-    }
-
-    int num_pages = poppler_document_get_n_pages(state->document);
-    if (num_pages <= 0) {
-        fprintf(stderr, "PDF has no pages.\n");
-        g_object_unref(state->document);
-        return -EINVAL;
-    }
-    state->num_pages = num_pages;
+    die_on(!state->document, "Error opening PDF: %s\n", error->message);
+    state->num_pages = poppler_document_get_n_pages(state->document);
+    die_on(state->num_pages <= 0, "PDF has no pages\n");
     state->current_scale = 1.0;
     state->needs_redraw = 1;
     state->needs_cache = 1;
@@ -246,8 +234,6 @@ static int init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     page_cache_update(state, state->current_page);
-
-    return 0;
 }
 
 static void update_scale(struct bv_prog_state *state) {
@@ -418,9 +404,7 @@ int main(int argc, char *argv[]) {
     expect(SDL_Init(SDL_INIT_VIDEO) == 0);
 
     struct bv_prog_state ps;
-    if (init_prog_state(&ps, argv[1]) < 0)
-        return EXIT_FAILURE;
-
+    init_prog_state(&ps, argv[1]);
     handle_sdl_events(&ps);
     free_prog_state(&ps);
 }
