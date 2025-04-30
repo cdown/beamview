@@ -356,9 +356,8 @@ static void handle_sdl_events(struct bv_prog_state *state) {
 
         if (state->needs_redraw) {
             update_window_textures(state);
-        } else if (state->needs_cache) {
-            idle_update_cache(state);
         }
+        idle_update_cache(state);
     }
 }
 
