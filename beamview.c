@@ -317,12 +317,8 @@ static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
             new_page = state->current_page + 1;
         }
         if (new_page != state->current_page) {
-            if (page_cache_update(state, new_page) == CACHE_UPDATED) {
-                fprintf(
-                    stderr,
-                    "Warning: Page %d uncached, performed blocking render.\n",
-                    new_page);
-            }
+            if (page_cache_update(state, new_page) == CACHE_UPDATED)
+                fprintf(stderr, "Warning: Page %d rendered live\n", new_page);
             state->current_page = new_page;
             state->needs_redraw = 1;
             state->needs_cache = 1;
