@@ -126,8 +126,7 @@ render_page_to_cairo_surface(PopplerPage *page, double scale, int *img_width,
 static void invalidate_cache_slot(struct bv_cache_entry *slot) {
     if (slot->cairo_surface)
         cairo_surface_destroy(slot->cairo_surface);
-    *slot = (struct bv_cache_entry){0};
-    slot->page_number = page_number_invalid;
+    *slot = (struct bv_cache_entry){.page_number = page_number_invalid};
 }
 
 enum cache_result { CACHE_UPDATED, CACHE_REUSED };
