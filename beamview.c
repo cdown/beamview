@@ -135,16 +135,21 @@ enum cache_result { CACHE_UPDATED, CACHE_REUSED };
 static enum cache_result page_cache_update(struct bv_prog_state *state,
                                            int page_index) {
     struct bv_cache_entry *slot = cache_slot(state->page_cache, page_index);
+
     if (slot->page_number == page_index)
         return CACHE_REUSED;
+
     PopplerPage *page = poppler_document_get_page(state->document, page_index);
     expect(page);
     invalidate_cache_slot(slot);
+
     slot->cairo_surface = render_page_to_cairo_surface(
         page, state->current_scale, &slot->img_width, &slot->img_height,
         &slot->page_width, &slot->page_height);
+
     slot->page_number = page_index;
     g_object_unref(page);
+
     return CACHE_UPDATED;
 }
 
@@ -168,10 +173,12 @@ static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
     SDL_Renderer *renderer = SDL_CreateRenderer(
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     XSetErrorHandler(old_handler);
+
     if (!renderer) {
         fprintf(stderr, "Warning: hardware acceleration unavailable\n");
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     }
+
     return renderer;
 }
 
@@ -200,13 +207,16 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     char resolved_path[PATH_MAX];
     die_on(!realpath(pdf_file, resolved_path), "Couldn't resolve %s\n",
            pdf_file);
+
     char *uri = g_strdup_printf("file://%s", resolved_path);
     GError *error = NULL;
     state->document = poppler_document_new_from_file(uri, NULL, &error);
     g_free(uri);
     die_on(!state->document, "Error opening PDF: %s\n", error->message);
+
     state->num_pages = poppler_document_get_n_pages(state->document);
     die_on(state->num_pages <= 0, "PDF has no pages\n");
+
     state->current_scale = 1.0;
     state->needs_redraw = 1;
     state->needs_cache = 1;
@@ -217,12 +227,14 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
     create_contexts(state->ctx, state->num_ctx);
+
     PopplerPage *first_page =
         poppler_document_get_page(state->document, state->current_page);
     expect(first_page);
     double page_width, page_height;
     poppler_page_get_size(first_page, &page_width, &page_height);
     g_object_unref(first_page);
+
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     page_cache_update(state, state->current_page);
@@ -232,6 +244,7 @@ static void update_scale(struct bv_prog_state *state) {
     double page_width, page_height;
     struct bv_cache_entry *entry =
         cache_slot(state->page_cache, state->current_page);
+
     if (entry->page_number == state->current_page) {
         page_width = entry->page_width;
         page_height = entry->page_height;
@@ -241,6 +254,7 @@ static void update_scale(struct bv_prog_state *state) {
         poppler_page_get_size(page, &page_width, &page_height);
         g_object_unref(page);
     }
+
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
     for (int i = 0; i < CACHE_SIZE; i++) {
@@ -255,12 +269,15 @@ static void update_window_textures(struct bv_prog_state *state) {
     struct bv_cache_entry *entry =
         cache_slot(state->page_cache, state->current_page);
     expect(entry->cairo_surface);
+
     int base_split = entry->img_width / state->num_ctx;
+
     for (int i = 0; i < state->num_ctx; i++) {
         int offset = i * base_split;
         int region_width = (i == state->num_ctx - 1)
                                ? (entry->img_width - offset)
                                : base_split;
+
         SDL_Renderer *renderer = state->ctx[i].renderer;
         struct bv_texture *texdata = &state->ctx[i].texture;
         SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
@@ -276,6 +293,7 @@ static void update_window_textures(struct bv_prog_state *state) {
             texdata->natural_width = region_width;
             texdata->natural_height = entry->img_height;
         }
+
         int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
         int cairo_stride = cairo_image_surface_get_stride(entry->cairo_surface);
         unsigned char *cairo_data =
@@ -287,6 +305,7 @@ static void update_window_textures(struct bv_prog_state *state) {
         present_texture(renderer, texdata->texture, region_width,
                         entry->img_height);
     }
+
     state->needs_redraw = 0;
 }
 
@@ -316,6 +335,7 @@ static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
                    state->current_page < state->num_pages - 1) {
             new_page = state->current_page + 1;
         }
+
         if (new_page != state->current_page) {
             if (page_cache_update(state, new_page) == CACHE_UPDATED)
                 fprintf(stderr, "Warning: Page %d rendered live\n", new_page);
@@ -339,9 +359,11 @@ static void handle_sdl_events(struct bv_prog_state *state) {
                 case SDL_QUIT:
                     running = 0;
                     break;
+
                 case SDL_KEYDOWN:
                     key_handler(&event, state, &running);
                     break;
+
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                         update_scale(state);
@@ -357,6 +379,7 @@ static void handle_sdl_events(struct bv_prog_state *state) {
         if (state->needs_redraw) {
             update_window_textures(state);
         }
+
         idle_update_cache(state);
     }
 }
@@ -380,6 +403,7 @@ int main(int argc, char *argv[]) {
                 argv[0]);
         return EXIT_FAILURE;
     }
+
     if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
         execlp("man", "man", "1", "beamview", NULL);
         perror("execlp man");
