@@ -130,10 +130,7 @@ static void invalidate_cache_slot(struct bv_cache_entry *slot) {
     slot->page_number = page_number_invalid;
 }
 
-enum cache_result {
-    CACHE_UPDATED,
-    CACHE_REUSED,
-};
+enum cache_result { CACHE_UPDATED, CACHE_REUSED };
 
 static enum cache_result page_cache_update(struct bv_prog_state *state,
                                            int page_index) {
