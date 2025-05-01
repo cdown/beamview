@@ -43,6 +43,12 @@ Run `make` to compile. You will need the following dependencies:
 - SDL2
 - Cairo
 
+## Examples of use
+
+The very first talk given with beamview was at SREcon Americas this year, and
+it worked very nicely ([see
+here](https://www.youtube.com/watch?v=7sjyqiMjmZk)).
+
 ## Comparison with other tools
 
 I used to use [pdfpc](https://github.com/pdfpc/pdfpc), and then
