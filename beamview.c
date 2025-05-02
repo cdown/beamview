@@ -200,9 +200,7 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
     }
 }
 
-static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
-    *state = (struct bv_prog_state){0};
-
+static void open_document(struct bv_prog_state *state, const char *pdf_file) {
     char resolved_path[PATH_MAX];
     die_on(!realpath(pdf_file, resolved_path), "Couldn't resolve %s\n",
            pdf_file);
@@ -215,28 +213,64 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
 
     state->num_pages = poppler_document_get_n_pages(state->document);
     die_on(state->num_pages <= 0, "PDF has no pages\n");
+}
 
-    state->current_scale = 1.0;
+static void init_cache(struct bv_prog_state *state) {
     state->needs_redraw = 1;
     state->needs_cache = 1;
     for (int i = 0; i < CACHE_SIZE; i++) {
         invalidate_cache_slot(&state->page_cache[i]);
     }
+    page_cache_update(state, state->current_page);
+}
+
+static void init_sdl_contexts(struct bv_prog_state *state) {
     state->num_ctx = 2;
     state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
     expect(state->ctx);
     create_contexts(state->ctx, state->num_ctx);
+}
 
-    PopplerPage *first_page =
-        poppler_document_get_page(state->document, state->current_page);
-    expect(first_page);
-    double page_width, page_height;
-    poppler_page_get_size(first_page, &page_width, &page_height);
-    g_object_unref(first_page);
+static void ensure_texture(struct bv_texture *texdata, SDL_Renderer *renderer,
+                           SDL_PixelFormatEnum pixel_fmt, int width,
+                           int height) {
+    if (texdata->texture == NULL || texdata->natural_width != width ||
+        texdata->natural_height != height) {
+        if (texdata->texture)
+            SDL_DestroyTexture(texdata->texture);
+        texdata->texture = SDL_CreateTexture(
+            renderer, pixel_fmt, SDL_TEXTUREACCESS_STREAMING, width, height);
+        expect(texdata->texture);
+        texdata->natural_width = width;
+        texdata->natural_height = height;
+    }
+}
 
-    state->current_scale =
-        compute_scale(state->ctx, state->num_ctx, page_width, page_height);
-    page_cache_update(state, state->current_page);
+static void update_texture_for_context(struct bv_sdl_ctx *ctx,
+                                       struct bv_cache_entry *entry,
+                                       int region_index, int num_ctx) {
+    int base_split = entry->img_width / num_ctx;
+    int offset = region_index * base_split;
+    int region_width = (region_index == num_ctx - 1)
+                           ? (entry->img_width - offset)
+                           : base_split;
+
+    SDL_Renderer *renderer = ctx->renderer;
+    struct bv_texture *texdata = &ctx->texture;
+    SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
+    ensure_texture(texdata, renderer, pixel_fmt, region_width,
+                   entry->img_height);
+
+    int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
+    int cairo_stride = cairo_image_surface_get_stride(entry->cairo_surface);
+    unsigned char *cairo_data =
+        cairo_image_surface_get_data(entry->cairo_surface);
+    expect(cairo_data);
+    unsigned char *region_data = cairo_data + offset * bytes_per_pixel;
+    expect(SDL_UpdateTexture(texdata->texture, NULL, region_data,
+                             cairo_stride) == 0);
+    present_texture(renderer, texdata->texture, region_width,
+                    entry->img_height);
 }
 
 static void update_scale(struct bv_prog_state *state) {
@@ -256,12 +290,49 @@ static void update_scale(struct bv_prog_state *state) {
 
     state->current_scale =
         compute_scale(state->ctx, state->num_ctx, page_width, page_height);
-    for (int i = 0; i < CACHE_SIZE; i++) {
-        invalidate_cache_slot(&state->page_cache[i]);
+
+    init_cache(state);
+}
+
+static void handle_fullscreen_event(const SDL_Event *event,
+                                    struct bv_prog_state *state) {
+    SDL_Window *win = SDL_GetWindowFromID(event->key.windowID);
+    for (int i = 0; i < state->num_ctx; i++) {
+        if (win == state->ctx[i].window) {
+            toggle_fullscreen(&state->ctx[i]);
+            break;
+        }
     }
-    page_cache_update(state, state->current_page);
-    state->needs_redraw = 1;
-    state->needs_cache = 1;
+    update_scale(state);
+}
+
+static void handle_navigation_event(const SDL_Keycode key,
+                                    struct bv_prog_state *state) {
+    int new_page = state->current_page;
+    if ((key == SDLK_LEFT || key == SDLK_UP || key == SDLK_PAGEUP) &&
+        state->current_page > 0) {
+        new_page = state->current_page - 1;
+    } else if ((key == SDLK_RIGHT || key == SDLK_DOWN ||
+                key == SDLK_PAGEDOWN) &&
+               state->current_page < state->num_pages - 1) {
+        new_page = state->current_page + 1;
+    }
+
+    if (new_page != state->current_page) {
+        if (page_cache_update(state, new_page) == CACHE_UPDATED)
+            fprintf(stderr, "Warning: Page %d rendered live\n", new_page);
+        state->current_page = new_page;
+        state->needs_redraw = 1;
+        state->needs_cache = 1;
+    }
+}
+
+static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
+    *state = (struct bv_prog_state){0};
+    open_document(state, pdf_file);
+    init_cache(state);
+    init_sdl_contexts(state);
+    update_scale(state);
 }
 
 static void update_window_textures(struct bv_prog_state *state) {
@@ -269,40 +340,8 @@ static void update_window_textures(struct bv_prog_state *state) {
         cache_slot(state->page_cache, state->current_page);
     expect(entry->cairo_surface);
 
-    int base_split = entry->img_width / state->num_ctx;
-
     for (int i = 0; i < state->num_ctx; i++) {
-        int offset = i * base_split;
-        int region_width = (i == state->num_ctx - 1)
-                               ? (entry->img_width - offset)
-                               : base_split;
-
-        SDL_Renderer *renderer = state->ctx[i].renderer;
-        struct bv_texture *texdata = &state->ctx[i].texture;
-        SDL_PixelFormatEnum pixel_fmt = SDL_PIXELFORMAT_ARGB8888;
-        if (texdata->texture == NULL ||
-            texdata->natural_width != region_width ||
-            texdata->natural_height != entry->img_height) {
-            if (texdata->texture)
-                SDL_DestroyTexture(texdata->texture);
-            texdata->texture = SDL_CreateTexture(
-                renderer, pixel_fmt, SDL_TEXTUREACCESS_STREAMING, region_width,
-                entry->img_height);
-            expect(texdata->texture);
-            texdata->natural_width = region_width;
-            texdata->natural_height = entry->img_height;
-        }
-
-        int bytes_per_pixel = SDL_BYTESPERPIXEL(pixel_fmt);
-        int cairo_stride = cairo_image_surface_get_stride(entry->cairo_surface);
-        unsigned char *cairo_data =
-            cairo_image_surface_get_data(entry->cairo_surface);
-        expect(cairo_data);
-        unsigned char *region_data = cairo_data + offset * bytes_per_pixel;
-        expect(SDL_UpdateTexture(texdata->texture, NULL, region_data,
-                                 cairo_stride) == 0);
-        present_texture(renderer, texdata->texture, region_width,
-                        entry->img_height);
+        update_texture_for_context(&state->ctx[i], entry, i, state->num_ctx);
     }
 
     state->needs_redraw = 0;
@@ -316,32 +355,9 @@ static void key_handler(const SDL_Event *event, struct bv_prog_state *state,
     if (key == SDLK_q && (mod & KMOD_SHIFT)) {
         *running = 0;
     } else if (key == SDLK_f && (mod & KMOD_SHIFT)) {
-        SDL_Window *win = SDL_GetWindowFromID(event->key.windowID);
-        for (int i = 0; i < state->num_ctx; i++) {
-            if (win == state->ctx[i].window) {
-                toggle_fullscreen(&state->ctx[i]);
-                break;
-            }
-        }
-        update_scale(state);
+        handle_fullscreen_event(event, state);
     } else {
-        int new_page = state->current_page;
-        if ((key == SDLK_LEFT || key == SDLK_UP || key == SDLK_PAGEUP) &&
-            state->current_page > 0) {
-            new_page = state->current_page - 1;
-        } else if ((key == SDLK_RIGHT || key == SDLK_DOWN ||
-                    key == SDLK_PAGEDOWN) &&
-                   state->current_page < state->num_pages - 1) {
-            new_page = state->current_page + 1;
-        }
-
-        if (new_page != state->current_page) {
-            if (page_cache_update(state, new_page) == CACHE_UPDATED)
-                fprintf(stderr, "Warning: Page %d rendered live\n", new_page);
-            state->current_page = new_page;
-            state->needs_redraw = 1;
-            state->needs_cache = 1;
-        }
+        handle_navigation_event(key, state);
     }
 }
 
