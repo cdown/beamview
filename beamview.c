@@ -22,6 +22,7 @@
 
 static const int page_number_invalid = -1;
 #define CACHE_SIZE 3
+#define NUM_CTX 2
 
 struct bv_texture {
     SDL_Texture *texture;
@@ -48,10 +49,10 @@ static struct bv_cache_entry *cache_slot(struct bv_cache_entry cache[],
 }
 
 struct bv_prog_state {
-    struct bv_sdl_ctx *ctx;
+    struct bv_sdl_ctx ctx[NUM_CTX];
     double current_scale;
     PopplerDocument *document;
-    int num_ctx, current_page, num_pages, needs_redraw, needs_cache;
+    int current_page, num_pages, needs_redraw, needs_cache;
     struct bv_cache_entry page_cache[CACHE_SIZE];
 };
 
@@ -218,17 +219,9 @@ static void open_document(struct bv_prog_state *state, const char *pdf_file) {
 static void init_cache(struct bv_prog_state *state) {
     state->needs_redraw = 1;
     state->needs_cache = 1;
-    for (int i = 0; i < CACHE_SIZE; i++) {
+    for (int i = 0; i < CACHE_SIZE; i++)
         invalidate_cache_slot(&state->page_cache[i]);
-    }
     page_cache_update(state, state->current_page);
-}
-
-static void init_sdl_contexts(struct bv_prog_state *state) {
-    state->num_ctx = 2;
-    state->ctx = calloc(state->num_ctx, sizeof(struct bv_sdl_ctx));
-    expect(state->ctx);
-    create_contexts(state->ctx, state->num_ctx);
 }
 
 static void ensure_texture(struct bv_texture *texdata, SDL_Renderer *renderer,
@@ -289,7 +282,7 @@ static void update_scale(struct bv_prog_state *state) {
     }
 
     state->current_scale =
-        compute_scale(state->ctx, state->num_ctx, page_width, page_height);
+        compute_scale(state->ctx, NUM_CTX, page_width, page_height);
 
     init_cache(state);
 }
@@ -297,7 +290,7 @@ static void update_scale(struct bv_prog_state *state) {
 static void handle_fullscreen_event(const SDL_Event *event,
                                     struct bv_prog_state *state) {
     SDL_Window *win = SDL_GetWindowFromID(event->key.windowID);
-    for (int i = 0; i < state->num_ctx; i++) {
+    for (int i = 0; i < NUM_CTX; i++) {
         if (win == state->ctx[i].window) {
             toggle_fullscreen(&state->ctx[i]);
             break;
@@ -331,7 +324,7 @@ static void init_prog_state(struct bv_prog_state *state, const char *pdf_file) {
     *state = (struct bv_prog_state){0};
     open_document(state, pdf_file);
     init_cache(state);
-    init_sdl_contexts(state);
+    create_contexts(state->ctx, NUM_CTX);
     update_scale(state);
 }
 
@@ -340,8 +333,8 @@ static void update_window_textures(struct bv_prog_state *state) {
         cache_slot(state->page_cache, state->current_page);
     expect(entry->cairo_surface);
 
-    for (int i = 0; i < state->num_ctx; i++) {
-        update_texture_for_context(&state->ctx[i], entry, i, state->num_ctx);
+    for (int i = 0; i < NUM_CTX; i++) {
+        update_texture_for_context(&state->ctx[i], entry, i, NUM_CTX);
     }
 
     state->needs_redraw = 0;
@@ -403,12 +396,11 @@ static void free_prog_state(struct bv_prog_state *state) {
     for (int i = 0; i < CACHE_SIZE; i++) {
         invalidate_cache_slot(&state->page_cache[i]);
     }
-    for (int i = 0; i < state->num_ctx; i++) {
+    for (int i = 0; i < NUM_CTX; i++) {
         SDL_DestroyTexture(state->ctx[i].texture.texture);
         SDL_DestroyRenderer(state->ctx[i].renderer);
         SDL_DestroyWindow(state->ctx[i].window);
     }
-    free(state->ctx);
     g_object_unref(state->document);
 }
 
