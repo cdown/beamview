@@ -265,23 +265,11 @@ static void update_texture_for_context(struct bv_sdl_ctx *ctx,
 }
 
 static void update_scale(struct bv_prog_state *state) {
-    double page_width, page_height;
+    page_cache_update(state, state->current_page);
     struct bv_cache_entry *entry =
         cache_slot(state->page_cache, state->current_page);
-
-    if (entry->page_number == state->current_page) {
-        page_width = entry->page_width;
-        page_height = entry->page_height;
-    } else {
-        PopplerPage *page =
-            poppler_document_get_page(state->document, state->current_page);
-        poppler_page_get_size(page, &page_width, &page_height);
-        g_object_unref(page);
-    }
-
-    state->current_scale =
-        compute_scale(state->ctx, NUM_CTX, page_width, page_height);
-
+    state->current_scale = compute_scale(state->ctx, NUM_CTX, entry->page_width,
+                                         entry->page_height);
     init_cache(state);
 }
 
