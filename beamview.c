@@ -1,5 +1,4 @@
 #include <SDL2/SDL.h>
-#include <X11/Xlib.h>
 #include <cairo.h>
 #include <glib.h>
 #include <limits.h>
@@ -9,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifdef HAVE_X11
+    #include <X11/Xlib.h>
+#endif
 
 #define die_on(cond, fmt, ...)                                                 \
     do {                                                                       \
@@ -163,18 +166,24 @@ static void idle_update_cache(struct bv_prog_state *state) {
     state->needs_cache = 0;
 }
 
+#ifdef HAVE_X11
 static int accel_x11_error_handler(Display *dpy, XErrorEvent *event) {
     (void)dpy;
     (void)event;
     return 0;
 }
+#endif
 
 static SDL_Renderer *create_renderer_with_fallback(SDL_Window *window) {
+#ifdef HAVE_X11
     int (*old_handler)(Display *, XErrorEvent *) =
         XSetErrorHandler(accel_x11_error_handler); // Avoid BadValue crash
+#endif
     SDL_Renderer *renderer = SDL_CreateRenderer(
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+#ifdef HAVE_X11
     XSetErrorHandler(old_handler);
+#endif
 
     if (!renderer) {
         fprintf(stderr, "Warning: hardware acceleration unavailable\n");

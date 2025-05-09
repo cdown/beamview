@@ -1,5 +1,15 @@
-COMMON_CFLAGS = -Wall -Wextra -pedantic `pkg-config --cflags sdl2 poppler-glib cairo` -I/usr/X11R6/include -L/usr/X11R6/lib
-LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm -lX11
+X11_AVAILABLE := $(shell pkg-config --exists x11 && echo yes)
+
+ifeq ($(X11_AVAILABLE),yes)
+    X11_CFLAGS := -DHAVE_X11 $(shell pkg-config --cflags x11)
+    X11_LIBS := $(shell pkg-config --libs x11)
+else
+    X11_CFLAGS :=
+    X11_LIBS :=
+endif
+
+COMMON_CFLAGS = -Wall -Wextra -pedantic `pkg-config --cflags sdl2 poppler-glib cairo` $(X11_CFLAGS)
+LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm $(X11_LIBS)
 
 CFLAGS_RELEASE = -O2 $(COMMON_CFLAGS)
 CFLAGS_DEBUG = -Og -ggdb -fno-omit-frame-pointer $(COMMON_CFLAGS)
