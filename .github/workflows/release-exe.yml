@@ -30,6 +30,7 @@ jobs:
             mingw-w64-x86_64-poppler
             mingw-w64-x86_64-cairo
             mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-binutils
 
       - name: Build (release)
         shell: msys2 {0}
@@ -37,10 +38,23 @@ jobs:
           make clean all
           ls -lh beamview.exe
 
-      - name: Package exe
+      - name: Gather runtime DLLs
+        shell: msys2 {0}
+        run: |
+          mkdir -p bundle
+          cp beamview.exe bundle/
+          for dll in $(
+            objdump -p beamview.exe \
+            | grep "DLL Name:" \
+            | sed 's/.*DLL Name: *//'
+          ); do
+            cp /mingw64/bin/$dll bundle/ || true
+          done
+
+      - name: Package bundle
         shell: pwsh
         run: |
-          Compress-Archive -Path beamview.exe `
+          Compress-Archive -Path bundle\* `
                            -DestinationPath beamview-windows-${{ github.ref_name }}.zip
 
       - name: Create release and upload asset
