@@ -38,23 +38,18 @@ jobs:
           make clean all
           ls -lh beamview.exe
 
-      - name: Install copypedeps
+      - name: Gather all runtime DLLs
         shell: msys2 {0}
         run: |
-          pacman -S --noconfirm mingw-w64-x86_64-avl
-          git clone https://github.com/brechtsanders/pedeps.git /tmp/pedeps
-          cd /tmp/pedeps
-          make
-          cp copypedeps /mingw64/bin/
-
-      - name: Bundle exe + all DLLs
-        shell: msys2 {0}
-        run: |
-          mkdir bundle
+          mkdir -p bundle
           cp beamview.exe bundle/
+
           cd bundle
-          # -r = recursive: include transitive deps
-          copypedeps -r beamview.exe .
+
+          ldd ../beamview.exe \
+            | grep -o '/mingw64/bin/[^ )]*' \
+            | sort -u \
+            | xargs -r cp --preserve=timestamps
 
       - name: Package bundle
         shell: pwsh
