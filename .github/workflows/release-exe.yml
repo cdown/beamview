@@ -1,4 +1,3 @@
-# File: .github/workflows/release-exe.yml
 name: Build Windows exe and release
 
 on:
@@ -21,6 +20,7 @@ jobs:
           msystem: MINGW64
           update: true
           install: >
+            make
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-SDL2
@@ -37,7 +37,7 @@ jobs:
       - name: Package exe
         shell: pwsh
         run: |
-          Compress-Archive -Path beamview.exe \
+          Compress-Archive -Path beamview.exe `
                            -DestinationPath beamview-windows-${{ github.ref_name }}.zip
 
       - name: Create release and upload asset
