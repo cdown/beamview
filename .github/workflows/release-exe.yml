@@ -26,19 +26,20 @@ jobs:
             mingw-w64-x86_64-poppler
             mingw-w64-x86_64-cairo
             mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-zip
 
       - name: Build (release)
-        shell: bash
+        shell: msys2 {0}
         run: |
-          export PATH="/c/msys64/mingw64/bin:$PATH"
           make clean all
-          ls -l beamview.exe
+          ls -lh beamview.exe
 
       - name: Package exe
+        shell: msys2 {0}
         run: |
-          powershell -Command "Compress-Archive beamview.exe beamview-windows-${{ github.ref_name }}.zip"
+          zip beamview-windows-${GITHUB_REF_NAME}.zip beamview.exe
 
-      - name: Create release and update asset
+      - name: Create release and upload asset
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
