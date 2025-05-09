@@ -1,3 +1,4 @@
+# File: .github/workflows/release-exe.yml
 name: Build Windows exe and release
 
 on:
@@ -26,7 +27,6 @@ jobs:
             mingw-w64-x86_64-poppler
             mingw-w64-x86_64-cairo
             mingw-w64-x86_64-glib2
-            mingw-w64-x86_64-zip
 
       - name: Build (release)
         shell: msys2 {0}
@@ -35,9 +35,10 @@ jobs:
           ls -lh beamview.exe
 
       - name: Package exe
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          zip beamview-windows-${GITHUB_REF_NAME}.zip beamview.exe
+          Compress-Archive -Path beamview.exe \
+                           -DestinationPath beamview-windows-${{ github.ref_name }}.zip
 
       - name: Create release and upload asset
         uses: ncipollo/release-action@v1
