@@ -20,6 +20,10 @@
 #define expect(x)                                                              \
     die_on(!(x), "!(%s) at %s:%s:%d\n", #x, __FILE__, __func__, __LINE__)
 
+#ifdef WIN32
+    #define realpath(N, R) _fullpath((R), (N), PATH_MAX)
+#endif
+
 static const int page_number_invalid = -1;
 #define CACHE_SIZE 3
 #define NUM_CTX 2
