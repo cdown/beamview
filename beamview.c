@@ -414,4 +414,6 @@ int main(int argc, char *argv[]) {
     init_prog_state(&ps, argv[1]);
     handle_sdl_events(&ps);
     free_prog_state(&ps);
+
+    return EXIT_SUCCESS;
 }
