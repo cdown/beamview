@@ -49,7 +49,10 @@ jobs:
           ldd ../beamview.exe \
             | grep -o '/mingw64/bin/[^ )]*' \
             | sort -u \
-            | xargs -r cp --preserve=timestamps
+            | xargs -r cp --preserve=timestamps -t .
+
+          echo "Bundled runtime files:"
+          ls -1
 
       - name: Package bundle
         shell: pwsh
