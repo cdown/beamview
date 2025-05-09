@@ -1,0 +1,46 @@
+name: Build Windows exe and release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build-windows-exe:
+    name: Build & Release on Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v3
+
+      - name: Set up MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-poppler
+            mingw-w64-x86_64-cairo
+            mingw-w64-x86_64-glib2
+
+      - name: Build (release)
+        shell: bash
+        run: |
+          export PATH="/c/msys64/mingw64/bin:$PATH"
+          make clean all
+          ls -l beamview.exe
+
+      - name: Package exe
+        run: |
+          powershell -Command "Compress-Archive beamview.exe beamview-windows-${{ github.ref_name }}.zip"
+
+      - name: Create release and update asset
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          files: |
+            beamview-windows-${{ github.ref_name }}.zip
