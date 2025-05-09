@@ -8,7 +8,15 @@ else
     X11_LIBS :=
 endif
 
-COMMON_CFLAGS = -Wall -Wextra -pedantic `pkg-config --cflags sdl2 poppler-glib cairo` $(X11_CFLAGS)
+UNAME_S := $(shell uname -s)
+ifeq ($(findstring MINGW,$(UNAME_S)),MINGW)
+    # windows needs console header in the PE
+    WINDOWS_SUBSYSTEM := -mconsole
+else
+    WINDOWS_SUBSYSTEM :=
+endif
+
+COMMON_CFLAGS = -Wall -Wextra -pedantic `pkg-config --cflags sdl2 poppler-glib cairo` $(X11_CFLAGS) $(WINDOWS_SUBSYSTEM)
 LIBS = `pkg-config --libs sdl2 poppler-glib cairo` -lm $(X11_LIBS)
 
 CFLAGS_RELEASE = -O2 $(COMMON_CFLAGS)
