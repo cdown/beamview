@@ -23,6 +23,7 @@
 static const int page_number_invalid = -1;
 #define CACHE_SIZE 3
 #define NUM_CTX 2
+#define BV_CTX "bv_ctx"
 
 struct bv_texture {
     SDL_Texture *texture;
@@ -195,6 +196,7 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
             win_height,
             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         expect(ctx[i].window);
+        SDL_SetWindowData(ctx[i].window, BV_CTX, &ctx[i]);
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
     }
@@ -277,12 +279,8 @@ static void update_scale(struct bv_prog_state *state) {
 static void handle_fullscreen_event(const SDL_Event *event,
                                     struct bv_prog_state *state) {
     SDL_Window *win = SDL_GetWindowFromID(event->key.windowID);
-    for (int i = 0; i < NUM_CTX; i++) {
-        if (win == state->ctx[i].window) {
-            toggle_fullscreen(&state->ctx[i]);
-            break;
-        }
-    }
+    struct bv_sdl_ctx *ctx = SDL_GetWindowData(win, BV_CTX);
+    toggle_fullscreen(ctx);
     update_scale(state);
 }
 
