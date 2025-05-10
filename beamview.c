@@ -35,6 +35,7 @@ struct bv_sdl_ctx {
     SDL_Renderer *renderer;
     struct bv_texture texture;
     int is_fullscreen;
+    int region_index;
 };
 
 struct bv_cache_entry {
@@ -196,6 +197,7 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
             win_height,
             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         expect(ctx[i].window);
+        ctx[i].region_index = i;
         SDL_SetWindowData(ctx[i].window, BV_CTX, &ctx[i]);
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
@@ -241,11 +243,10 @@ static void ensure_texture(struct bv_texture *texdata, SDL_Renderer *renderer,
 }
 
 static void update_texture_for_context(struct bv_sdl_ctx *ctx,
-                                       struct bv_cache_entry *entry,
-                                       int region_index, int num_ctx) {
-    int base_split = entry->img_width / num_ctx;
-    int offset = region_index * base_split;
-    int region_width = (region_index == num_ctx - 1)
+                                       struct bv_cache_entry *entry) {
+    int base_split = entry->img_width / NUM_CTX;
+    int offset = ctx->region_index * base_split;
+    int region_width = (ctx->region_index == NUM_CTX - 1)
                            ? (entry->img_width - offset)
                            : base_split;
 
@@ -319,7 +320,7 @@ static void update_window_textures(struct bv_prog_state *state) {
     expect(entry->cairo_surface);
 
     for (int i = 0; i < NUM_CTX; i++) {
-        update_texture_for_context(&state->ctx[i], entry, i, NUM_CTX);
+        update_texture_for_context(&state->ctx[i], entry);
     }
 
     state->needs_redraw = 0;
