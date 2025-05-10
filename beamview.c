@@ -89,7 +89,7 @@ static double compute_scale(struct bv_sdl_ctx ctx[], int num_ctx,
     double scale = 0;
     for (int i = 0; i < num_ctx; i++) {
         int win_width, win_height;
-        SDL_GetWindowSize(ctx[i].window, &win_width, &win_height);
+        SDL_GetRendererOutputSize(ctx[i].renderer, &win_width, &win_height);
         double scale_i = fmax((double)win_width / (page_width / num_ctx),
                               (double)win_height / page_height);
         scale = fmax(scale, scale_i);
@@ -192,7 +192,8 @@ static void create_contexts(struct bv_sdl_ctx ctx[], int num_ctx) {
     for (int i = 0; i < num_ctx; i++) {
         ctx[i].window = SDL_CreateWindow(
             "beamview", center_x + i * offset, center_y + i * offset, win_width,
-            win_height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+            win_height,
+            SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
         expect(ctx[i].window);
         ctx[i].renderer = create_renderer_with_fallback(ctx[i].window);
         expect(ctx[i].renderer);
